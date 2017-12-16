@@ -13,6 +13,7 @@
 # limitations under the License.
 # ------------------------------------------------------------------------------
 import abc
+from collections import deque
 import logging
 import queue
 from threading import RLock
@@ -37,6 +38,10 @@ from sawtooth_validator.protobuf.transaction_pb2 import TransactionHeader
 from sawtooth_validator.state.settings_view import SettingsView
 
 LOGGER = logging.getLogger(__name__)
+
+
+NUM_PUBLISH_COUNT_SAMPLES = 5
+INITIAL_PUBLISH_COUNT = 30
 
 
 class PendingBatchObserver(metaclass=abc.ABCMeta):
@@ -447,6 +452,8 @@ class BlockPublisher(object):
         self._pending_batches = []  # batches we are waiting for validation,
         # arranged in the order of batches received.
         self._pending_batch_ids = []
+        self._publish_count_average = _RollingAverage(
+            NUM_PUBLISH_COUNT_SAMPLES, INITIAL_PUBLISH_COUNT)
 
         self._chain_head = chain_head  # block (BlockWrapper)
         self._squash_handler = squash_handler
@@ -488,6 +495,16 @@ class BlockPublisher(object):
         self._queued_batch_ids.append(batch.header_signature)
         for observer in self._batch_observers:
             observer.notify_batch_pending(batch)
+
+    def can_accept_batch(self):
+        can_accept = len(self._pending_batches) < \
+            (2 * self._publish_count_average.value)
+
+        if not can_accept:
+            LOGGER.warning("Cannot accept more batches than %s",
+                           2 * self._publish_count_average.value)
+
+        return can_accept
 
     @property
     def chain_head_lock(self):
@@ -595,8 +612,15 @@ class BlockPublisher(object):
         committed_set = set([x.header_signature for x in committed_batches])
 
         pending_batches = self._pending_batches
+
+        # Update the average batch drawdown
         self._pending_batches = []
         self._pending_batch_ids = []
+
+        num_committed_batches = len(committed_batches)
+        if num_committed_batches > 0:
+            remainder = len(pending_batches) - num_committed_batches
+            self._publish_count_average.update(num_committed_batches)
 
         # Uncommitted and pending disjoint sets
         # since batches can only be committed to a chain once.
@@ -712,3 +736,25 @@ class BlockPublisher(object):
                 return True
             if batch_id in self._queued_batch_ids:
                 return True
+
+
+class _RollingAverage(object):
+
+    def __init__(self, sample_size, initial_value):
+        self._samples = deque(maxlen=sample_size)
+
+        self._samples.append(initial_value)
+        self._current_average = initial_value
+
+    @property
+    def value(self):
+        return self._current_average
+
+    def update(self, sample):
+        """Add the sample and return the updated average.
+        """
+        self._samples.append(sample)
+
+        self._current_average = sum(list(self._samples)) / len(self._samples)
+
+        return self._current_average

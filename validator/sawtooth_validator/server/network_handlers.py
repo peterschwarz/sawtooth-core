@@ -29,6 +29,8 @@ from sawtooth_validator.journal.responder import BatchByBatchIdResponderHandler
 from sawtooth_validator.journal.responder import ResponderBatchResponseHandler
 from sawtooth_validator.journal.responder import \
     BatchByTransactionIdResponderHandler
+from sawtooth_validator.journal.back_pressure_handlers import \
+    GossipBatchBackpressureHandler
 
 from sawtooth_validator.gossip import signature_verifier
 
@@ -74,6 +76,7 @@ def add(
         has_block,
         has_batch,
         permission_verifier,
+        block_publisher
 ):
 
     # -- Basic Networking -- #
@@ -170,6 +173,12 @@ def add(
     dispatcher.add_handler(
         validator_pb2.Message.GOSSIP_UNREGISTER,
         PeerUnregisterHandler(gossip=gossip),
+        thread_pool)
+
+    # GOSSIP_MESSAGE ) Apply backpressure on the batch
+    dispatcher.add_handler(
+        validator_pb2.Message.GOSSIP_MESSAGE,
+        GossipBatchBackpressureHandler(block_publisher.can_accept_batch),
         thread_pool)
 
     # GOSSIP_MESSAGE ) Check if this is a block and if we already have it
