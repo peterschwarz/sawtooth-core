@@ -32,6 +32,8 @@ services:
     image: sawtooth-intkey-tp-python:$ISOLATION_ID
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
+    environment:
+      PYTHONPATH: "/project/sawtooth-core/families/block_info"
     expose:
       - 4004
     depends_on:
@@ -51,12 +53,50 @@ services:
         sawset genesis \
           -k /etc/sawtooth/keys/validator.priv \
           -o config-genesis.batch && \
-        sawadm genesis config-genesis.batch && \
-        sawtooth-validator -v \
-            --endpoint tcp://validator:8800 \
+        sawset proposal create \
+          -k /etc/sawtooth/keys/validator.priv \
+          sawtooth.validator.batch_injectors=block_info \
+          'sawtooth.validator.block_validation_rules=NofX:1,block_info;XatY:block_info,0;local:0' \
+          -o config.batch && \
+        sawadm genesis \
+          config-genesis.batch config.batch && \
+        sawtooth-validator --endpoint tcp://validator:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
     \""
+    environment:
+      PYTHONPATH: "/project/sawtooth-core/families/block_info"
+    stop_signal: SIGKILL
+
+  # validator:
+  #   image: sawtooth-validator:$ISOLATION_ID
+  #   volumes:
+  #     - $SAWTOOTH_CORE:/project/sawtooth-core
+  #   expose:
+  #     - 4004
+  #     - 8800
+  #   command: "bash -c \"\
+  #       sawadm keygen && \
+  #       sawset genesis \
+  #         -k /etc/sawtooth/keys/validator.priv \
+  #         -o config-genesis.batch && \
+  #       sawadm genesis config-genesis.batch && \
+  #       sawtooth-validator -v \
+  #           --endpoint tcp://validator:8800 \
+  #           --bind component:tcp://eth0:4004 \
+  #           --bind network:tcp://eth0:8800 \
+  #   \""
+  #   stop_signal: SIGKILL
+
+  block-info-tp:
+    image: sawtooth-block-info-tp:$ISOLATION_ID
+    volumes:
+      - $SAWTOOTH_CORE:/project/sawtooth-core
+    expose:
+      - 4004
+    depends_on:
+      - validator
+    command: block-info-tp -vv -C tcp://validator:4004
     stop_signal: SIGKILL
 
   rest-api:
@@ -68,7 +108,7 @@ services:
       - 8008
     depends_on:
       - validator
-    command: sawtooth-rest-api -v --connect tcp://validator:4004 --bind rest-api:8008
+    command: sawtooth-rest-api --connect tcp://validator:4004 --bind rest-api:8008
     stop_signal: SIGKILL
 
   test-intkey-smoke-python:
@@ -80,14 +120,17 @@ services:
     depends_on:
       - validator
       - rest-api
-    command: nose2-3
-        -c /project/sawtooth-core/integration/sawtooth_integration/nose2.cfg
-        -v
-        -s /project/sawtooth-core/integration/sawtooth_integration/tests
-        test_intkey_smoke.TestIntkeySmoke
+    # command: nose2-3
+    #     -c /project/sawtooth-core/integration/sawtooth_integration/nose2.cfg
+    #     -v
+    #     -s /project/sawtooth-core/integration/sawtooth_integration/tests
+    #     test_intkey_smoke.TestIntkeySmoke
+    #command: nose2-3 -c /project/sawtooth-core/integration/sawtooth_integration/nose2.cfg -v -s /project/sawtooth-core/integration/sawtooth_integration/tests test_intkey_smoke.TestIntkeySmoke
+    command: tail -f /dev/null
     stop_signal: SIGKILL
     environment:
       PYTHONPATH: "/project/sawtooth-core/sdk/python:\
         /project/sawtooth-core/sdk/examples/intkey_python:\
         /project/sawtooth-core/integration:\
-        /project/sawtooth-core/signing"
+        /project/sawtooth-core/signing:\
+        /project/sawtooth-core/families/block_info"

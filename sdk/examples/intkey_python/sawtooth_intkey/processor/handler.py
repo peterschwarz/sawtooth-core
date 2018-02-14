@@ -22,7 +22,7 @@ import cbor
 from sawtooth_sdk.processor.handler import TransactionHandler
 from sawtooth_sdk.processor.exceptions import InvalidTransaction
 from sawtooth_sdk.processor.exceptions import InternalError
-
+from sawtooth_block_info.protobuf.block_info_pb2 import BlockInfoConfig, BlockInfo
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +37,57 @@ FAMILY_NAME = 'intkey'
 
 INTKEY_ADDRESS_PREFIX = hashlib.sha512(
     FAMILY_NAME.encode('utf-8')).hexdigest()[0:6]
+
+
+BLOCK_INFO_CONF_ADDR = '00b10c01' + ''.zfill(62)
+BLOCK_INFO_PREFIX = '00b10c00'
+
+def make_block_info_addr(block_num):
+    return BLOCK_INFO_PREFIX + hex(block_num)[2:].zfill(62)
+
+def _get_raw_contents(merkle_addr, context):
+    LOGGER.debug("*** retrieving {}".format(merkle_addr))
+    state_entries = context.get_state([merkle_addr])
+    if state_entries:
+        try:
+            entry = state_entries[0].data
+        except:
+            LOGGER.exception("Corrupt data at %s", merkle_addr)
+            raise InternalError("Corrupt data at {}".format(merkle_addr))
+        return entry
+    return None
+
+def get_block_info_config(context):
+    block_info_conf_contents = _get_raw_contents(BLOCK_INFO_CONF_ADDR, context)
+    if not block_info_conf_contents:
+        raise InternalError('block_info_conf_contents is None')
+    block_info_config = BlockInfoConfig()
+    try:
+        block_info_config.ParseFromString(block_info_conf_contents)
+    except Exception:
+        msg = "Failed to retrieve block info config."
+        LOGGER.exception(msg)
+        raise InternalError(msg)
+    assert block_info_config
+    return block_info_config
+
+def get_block_info(block_num, context):
+    block_info_addr = make_block_info_addr(block_num)
+    block_info_contents = _get_raw_contents(block_info_addr, context)
+    if not block_info_contents:
+        raise InternalError('block_info_contents is None for block_num={}'.format(block_num))
+    block_info = BlockInfo()
+    try:
+        block_info.ParseFromString(block_info_contents)
+    except Exception:
+        msg = "Failed to retrieve block info for block {}.".format(block_num)
+        LOGGER.exception(msg)
+        raise InternalError(msg)
+    return block_info
+
+def timestamp(context):
+    latest_block = get_block_info_config(context).latest_block
+    return get_block_info(latest_block, context).timestamp
 
 
 def make_intkey_address(name):
@@ -55,11 +106,12 @@ class IntkeyTransactionHandler(TransactionHandler):
 
     @property
     def namespaces(self):
-        return [INTKEY_ADDRESS_PREFIX]
+        return [INTKEY_ADDRESS_PREFIX, '00b10c01', '00b10c00']
 
     def apply(self, transaction, context):
         verb, name, value = _unpack_transaction(transaction)
 
+        t = timestamp(context)
         state = _get_state_data(name, context)
 
         updated_state = _do_intkey(verb, name, value, state)

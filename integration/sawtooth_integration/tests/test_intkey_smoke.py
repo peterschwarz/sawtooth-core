@@ -17,6 +17,9 @@
 
 import unittest
 import logging
+import random
+import time
+import string
 import operator  # used by verifier
 # -- used by rest_api callers --
 import urllib.request
@@ -36,6 +39,7 @@ LOGGER.setLevel(logging.INFO)
 WAIT = 300
 INTKEY_PREFIX = '1cf126'
 
+SLEEP_BETWEEN_TXN = 0.03
 
 class TestIntkeySmoke(unittest.TestCase):
     @classmethod
@@ -68,8 +72,47 @@ class TestIntkeySmoke(unittest.TestCase):
 
         populate, valid_txns, invalid_txns = self.make_txn_batches()
 
-        self.verify_empty_state()
+        #self.verify_empty_state()
 
+        # batches = (
+        #     populate,
+        #     valid_txns,
+        #     invalid_txns,
+        #     valid_txns,
+        #     populate,
+        #     valid_txns
+        # )
+
+        # how_many_updates = 0
+
+        # for batch in batches:
+        #     if batch == valid_txns:
+        #         how_many_updates += 1
+        #     self.post_and_verify(batch, how_many_updates)
+
+
+        batch = [tuple(('set', self._randname(), self._randval()))]
+        #post_and_verify(batch, 0)
+        batch = IntkeyMessageFactory().create_batch(batch)
+        _post_batch(batch)
+        
+        for i in range(1,100):
+            batch = [tuple(('inc', self._randname(), self._randval()))]
+            #post_and_verify(batch, 0)
+            batch = IntkeyMessageFactory().create_batch(batch)
+            LOGGER.error('Posting batch %d', i)
+
+            try:
+                response = _post_batch2(batch)
+            except urllib.error.HTTPError:
+                time.sleep(1)
+            time.sleep(SLEEP_BETWEEN_TXN)
+
+            
+        #time.sleep(5)
+
+        how_many_updates = 0
+        
         batches = (
             populate,
             valid_txns,
@@ -78,16 +121,28 @@ class TestIntkeySmoke(unittest.TestCase):
             populate,
             valid_txns
         )
-
-        how_many_updates = 0
-
+        
         for batch in batches:
             if batch == valid_txns:
                 how_many_updates += 1
             self.post_and_verify(batch, how_many_updates)
+        
+        return
+            
 
     # assertions
 
+    def _randname(self):
+        #return ''.join([random.choice(string.ascii_letters) for k in range(1,12)])
+        return 'sdfdsf'
+
+    def _randval(self):
+        res = ''
+        for k in range(1,3):
+            res += random.choice(string.digits)
+        return int(res)
+
+    
     def post_and_verify(self, batch, how_many_updates):
         batch = IntkeyMessageFactory().create_batch(batch)
         LOGGER.info('Posting batch')
@@ -99,6 +154,8 @@ class TestIntkeySmoke(unittest.TestCase):
         expected_state = self.verifier.state_after_n_updates(num)
         actual_state = _get_data()
         LOGGER.info('Current state: %s', actual_state)
+        if 'sdfdsf' in actual_state:
+            del actual_state['sdfdsf']
         self.assertEqual(
             expected_state,
             actual_state,
@@ -129,6 +186,13 @@ def _post_batch(batch):
     response = _submit_request('{}&wait={}'.format(response['link'], WAIT))
     return response
 
+def _post_batch2(batch):
+    headers = {'Content-Type': 'application/octet-stream'}
+    response = _query_rest_api2(
+        '/batches',
+        data=batch, headers=headers, expected_code=202)
+    return response
+
 
 def _get_data():
     state = _get_state()
@@ -150,6 +214,12 @@ def _query_rest_api(suffix='', data=None, headers=None, expected_code=200):
     return _submit_request(urllib.request.Request(url, data, headers),
                            expected_code=expected_code)
 
+def _query_rest_api2(suffix='', data=None, headers=None, expected_code=200):
+    if headers is None:
+        headers = {}
+    url = 'http://rest-api:8008' + suffix
+    conn = urllib.request.urlopen(urllib.request.Request(url, data, headers))
+    return conn
 
 def _submit_request(request, expected_code=200):
     conn = urllib.request.urlopen(request)

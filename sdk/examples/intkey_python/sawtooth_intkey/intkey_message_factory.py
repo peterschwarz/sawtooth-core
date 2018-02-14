@@ -25,7 +25,8 @@ class IntkeyMessageFactory:
         self._factory = MessageFactory(
             family_name='intkey',
             family_version='1.0',
-            namespace=INTKEY_ADDRESS_PREFIX,
+            namespace=[INTKEY_ADDRESS_PREFIX, '00b10c01', '00b10c00'],
+            #namespace=INTKEY_ADDRESS_PREFIX,
             signer=signer)
 
     def _dumps(self, obj):
@@ -43,7 +44,7 @@ class IntkeyMessageFactory:
     def _create_txn(self, txn_function, verb, name, value):
         payload = self._dumps({'Verb': verb, 'Name': name, 'Value': value})
 
-        addresses = [make_intkey_address(name)]
+        addresses = [make_intkey_address(name), '00b10c01', '00b10c00' ]
 
         return txn_function(payload, addresses, addresses, [])
 
