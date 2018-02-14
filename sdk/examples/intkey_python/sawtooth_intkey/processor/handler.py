@@ -18,11 +18,11 @@ import hashlib
 
 import cbor
 
-
 from sawtooth_sdk.processor.handler import TransactionHandler
 from sawtooth_sdk.processor.exceptions import InvalidTransaction
 from sawtooth_sdk.processor.exceptions import InternalError
-from sawtooth_block_info.protobuf.block_info_pb2 import BlockInfoConfig, BlockInfo
+from sawtooth_block_info.protobuf.block_info_pb2 import BlockInfoConfig
+from sawtooth_block_info.protobuf.block_info_pb2 import BlockInfo
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,8 +42,10 @@ INTKEY_ADDRESS_PREFIX = hashlib.sha512(
 BLOCK_INFO_CONF_ADDR = '00b10c01' + ''.zfill(62)
 BLOCK_INFO_PREFIX = '00b10c00'
 
+
 def make_block_info_addr(block_num):
     return BLOCK_INFO_PREFIX + hex(block_num)[2:].zfill(62)
+
 
 def _get_raw_contents(merkle_addr, context):
     LOGGER.debug("*** retrieving {}".format(merkle_addr))
@@ -71,11 +73,13 @@ def get_block_info_config(context):
     assert block_info_config
     return block_info_config
 
+
 def get_block_info(block_num, context):
     block_info_addr = make_block_info_addr(block_num)
     block_info_contents = _get_raw_contents(block_info_addr, context)
-    if not block_info_contents:
-        raise InternalError('block_info_contents is None for block_num={}'.format(block_num))
+    if block_info_contents is None:
+        raise InternalError(
+            'block_info_contents is None for block_num={}'.format(block_num))
     block_info = BlockInfo()
     try:
         block_info.ParseFromString(block_info_contents)
@@ -84,6 +88,7 @@ def get_block_info(block_num, context):
         LOGGER.exception(msg)
         raise InternalError(msg)
     return block_info
+
 
 def timestamp(context):
     latest_block = get_block_info_config(context).latest_block
@@ -132,7 +137,7 @@ def _unpack_transaction(transaction):
 def _decode_transaction(transaction):
     try:
         content = cbor.loads(transaction.payload)
-    except:
+    except Exception:
         raise InvalidTransaction('Invalid payload serialization')
 
     try:
@@ -183,7 +188,7 @@ def _get_state_data(name, context):
         return cbor.loads(state_entries[0].data)
     except IndexError:
         return {}
-    except:
+    except Exception:
         raise InternalError('Failed to load state data')
 
 
