@@ -50,19 +50,16 @@ def make_block_info_addr(block_num):
 def _get_raw_contents(merkle_addr, context):
     LOGGER.debug("*** retrieving {}".format(merkle_addr))
     state_entries = context.get_state([merkle_addr])
-    if state_entries:
-        try:
-            entry = state_entries[0].data
-        except:
-            LOGGER.exception("Corrupt data at %s", merkle_addr)
-            raise InternalError("Corrupt data at {}".format(merkle_addr))
-        return entry
-    return None
+    try:
+        entry = state_entries[0].data
+    except IndexError:
+        LOGGER.warning("No block info data at %s", merkle_addr)
+        return b''
+    return entry
+
 
 def get_block_info_config(context):
     block_info_conf_contents = _get_raw_contents(BLOCK_INFO_CONF_ADDR, context)
-    if not block_info_conf_contents:
-        raise InternalError('block_info_conf_contents is None')
     block_info_config = BlockInfoConfig()
     try:
         block_info_config.ParseFromString(block_info_conf_contents)
