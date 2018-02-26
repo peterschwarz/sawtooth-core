@@ -1,0 +1,8 @@
+[package]
+name = "validator2"
+version = "0.1.0"
+authors = ["Peter Schwarz <pschwarz@bitwise.io>"]
+
+[dependencies]
+clap = ">=2.29.0"
+pyo3 = "0.2"
