@@ -1,38 +1,65 @@
 extern crate clap;
 extern crate pyo3;
 
+mod cli;
+
 use clap::{Arg, App, ArgMatches};
-use pyo3::{Python, Py, PyList, PyString, PyResult, ObjectProtocol};
+use pyo3::{Python,
+           Py,
+           PyObject,
+           PyObjectWithToken,
+           PyList,
+           PyString,
+           PyResult,
+           PyModule,
+           ToPyPointer,
+           ObjectProtocol};
+
+use cli::error::CliError;
 
 const DISTRIBUTION_NAME: &'static str = "sawtooth-validator";
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 fn main() {
+    if let Err(err) = run() {
+        println!("Unable to start Sawtooth: {:?}", err);
+    }
+}
+
+fn run() -> Result<(), CliError> {
     // let args = parse_args();
 
     let gil = Python::acquire_gil();
     let python = gil.python();
 
-    let args: Vec<String> = std::env::args().skip(1)
-        .collect();
+    let matches = parse_args();
+
+    let py_sawtooth = load_py_module(python, "sawtooth_validator.server.cli")?;
     
-    let py_args = PyList::new(python, &args);
-    let py_sawtooth = match python.import("sawtooth_validator.server.cli") {
-        Ok(module) => module,
-        Err(err) => {
-            eprintln!("Unable to load sawtooth: {:?}", err);
-            err.print(python);
-            return;
-        }
-    };
-    
-    match py_sawtooth.call("main", (env!("CARGO_PKG_NAME"), py_args), ()) {
-        Ok(_) => println!("Exiting..."),
-        Err(err) => {
-            eprintln!("Exiting with error {:?}", err);
-            err.print(python);
-        },
-    };
+    // match py_sawtooth.call("main", (env!("CARGO_PKG_NAME"), py_args), ()) {
+    //     Ok(_) => println!("Exiting..."),
+    //     Err(err) => {
+    //         eprintln!("Exiting with error {:?}", err);
+    //         err.print(python);
+    //     },
+    // };
+
+    Ok(())
+}
+
+fn load_py_module(python: Python, module_name: &str) -> Result<PyModule, CliError> {
+    python.import("sawtooth_validator.server.cli")
+        .map_err(|err| {
+           CliError::PythonLoadError(format!("Unable to load {}", module_name)) 
+        })
+}
+
+fn py_str<T>(obj: &T)
+    -> String
+    where T: PyObjectWithToken + ToPyPointer
+{
+    format!("{}", ObjectProtocol::str(obj).unwrap_or_else(
+            |_| format!("unable to str {:?}", obj)))
 }
 
 fn parse_args<'a>() -> ArgMatches<'a> {
@@ -122,4 +149,9 @@ fn parse_args<'a>() -> ArgMatches<'a> {
              .help("set the maximum number of peers to accept"));
 
     app.get_matches()
+}
+
+fn check_directory(path: &str, human_readable_name: &str) -> Result<(), CliError> {
+
+    Ok(())
 }
