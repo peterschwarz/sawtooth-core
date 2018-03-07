@@ -6,3 +6,4 @@ authors = ["Peter Schwarz <pschwarz@bitwise.io>"]
 [dependencies]
 clap = ">=2.29.0"
 pyo3 = "0.2"
+config = "0.8"

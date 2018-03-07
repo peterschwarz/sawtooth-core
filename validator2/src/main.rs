@@ -1,15 +1,13 @@
 extern crate clap;
 extern crate pyo3;
+extern crate config;
 
 mod cli;
 
+use std::path::{Path, PathBuf};
+
 use clap::{Arg, App, ArgMatches};
 use pyo3::{Python,
-           Py,
-           PyObject,
-           PyObjectWithToken,
-           PyList,
-           PyString,
            PyResult,
            PyModule,
            ToPyPointer,
@@ -35,6 +33,14 @@ fn run() -> Result<(), CliError> {
     let matches = parse_args();
 
     let py_sawtooth = load_py_module(python, "sawtooth_validator.server.cli")?;
+
+
+    let mut validator_config = config::Config::default();
+    let mut config_path = PathBuf::new();
+    config_path.push(matches.value_of("config_dir").unwrap_or(""));
+    config_path.push("validator.toml");
+    validator_config.merge(config::File::from(config_path));
+
     
     // match py_sawtooth.call("main", (env!("CARGO_PKG_NAME"), py_args), ()) {
     //     Ok(_) => println!("Exiting..."),
@@ -47,20 +53,6 @@ fn run() -> Result<(), CliError> {
     Ok(())
 }
 
-fn load_py_module(python: Python, module_name: &str) -> Result<PyModule, CliError> {
-    python.import("sawtooth_validator.server.cli")
-        .map_err(|err| {
-           CliError::PythonLoadError(format!("Unable to load {}", module_name)) 
-        })
-}
-
-fn py_str<T>(obj: &T)
-    -> String
-    where T: PyObjectWithToken + ToPyPointer
-{
-    format!("{}", ObjectProtocol::str(obj).unwrap_or_else(
-            |_| format!("unable to str {:?}", obj)))
-}
 
 fn parse_args<'a>() -> ArgMatches<'a> {
     let app = App::new(DISTRIBUTION_NAME)
@@ -152,6 +144,55 @@ fn parse_args<'a>() -> ArgMatches<'a> {
 }
 
 fn check_directory(path: &str, human_readable_name: &str) -> Result<(), CliError> {
+    let p = Path::new(path);
+
+    if !p.exists() {
+        return Err(CliError::FileSystemError(
+                format!("{} directory does not exist: {}",
+                        human_readable_name,
+                        path)))
+    }
+
+    if !p.is_dir() {
+        return Err(CliError::FileSystemError(
+                format!("{} directory is not a directory: {}",
+                        human_readable_name,
+                        path)))
+    }
+
+    if let Ok(metadata) = p.metadata() {
+        if metadata.permissions().readonly() {
+            return Err(CliError::FileSystemError(
+                    format!("{} directory is not writable: {}",
+                            human_readable_name,
+                            path)))
+        }
+    } else {
+        return Err(CliError::FileSystemError(
+                    format!("{} director has no meta data: {}",
+                            human_readable_name,
+                            path)))
+    }
 
     Ok(())
+}
+
+// Python Briging Functions
+fn load_py_module<'p>(python: Python<'p>, module_name: &str) -> Result<&'p PyModule, CliError> {
+    python.import("sawtooth_validator.server.cli")
+        .map_err(|err| {
+             let traceback: String = if let Some(traceback) = err.ptraceback {
+                 match traceback.extract(python) {
+                     Ok(s) => s,
+                     Err(_) => return CliError::PythonSystemError
+                 }
+             } else {
+                 String::from("<No Traceback>")
+             };
+
+             CliError::PythonLoadError(
+                 format!("Unable to load {}\n{}",
+                         module_name,
+                         traceback))
+        })
 }
