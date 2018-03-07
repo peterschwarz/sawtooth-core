@@ -3,6 +3,7 @@ extern crate pyo3;
 extern crate config;
 
 mod cli;
+mod conf;
 
 use std::path::{Path, PathBuf};
 
