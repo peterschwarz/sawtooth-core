@@ -5,7 +5,7 @@ extern crate config;
 mod cli;
 mod conf;
 
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 
 use clap::{Arg, App, ArgMatches};
 use pyo3::{Python,
@@ -19,8 +19,7 @@ use conf::validator::{ValidatorConfig,
                       PeeringConfig,
                       SchedulerConfig,
                       RolesConfig,
-                      load_toml_validator_config,
-                      merge_validator_config};
+                      load_validator_config};
 use conf::path::load_path_config;
 use cli::error::CliError;
 
@@ -46,8 +45,6 @@ fn run() -> Result<(), CliError> {
         create_validator_config(&matches)?,
         path_config.config_dir.as_ref().unwrap())?;
 
-    println!("config: {}", config);
-
     let gil = Python::acquire_gil();
     let python = gil.python();
     let py_sawtooth = load_py_module(python, "sawtooth_validator.server.cli")?;
@@ -62,22 +59,6 @@ fn run() -> Result<(), CliError> {
 
     Ok(())
 }
-
-fn load_validator_config(first_config: ValidatorConfig,
-                         config_dir: &str)
-    -> Result<ValidatorConfig, CliError>
-{
-    let mut config_path = PathBuf::new();
-    config_path.push(config_dir);
-    config_path.push("validator.toml");
-
-    let toml_config = load_toml_validator_config(config_path.as_path())
-        .map_err(CliError::ConfigurationError)?;
-
-    Ok(merge_validator_config(
-            &mut [first_config, toml_config, ValidatorConfig::default()]))
-}
-
 
 fn create_validator_config(arg_matches: &ArgMatches)
     -> Result<ValidatorConfig, CliError>
