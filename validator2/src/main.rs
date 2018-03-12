@@ -36,12 +36,15 @@ fn run() -> Result<(), CliError> {
     let py_sawtooth = load_py_module(python, "sawtooth_validator.server.cli")?;
 
 
-    let mut validator_config = config::Config::default();
     let mut config_path = PathBuf::new();
     config_path.push(matches.value_of("config_dir").unwrap_or(""));
     config_path.push("validator.toml");
-    validator_config.merge(config::File::from(config_path));
 
+    let config = load_validator_config(
+        create_validator_config(&matches)?,
+        matches.value_of("config_dir").unwrap_or(""))?;
+
+    println!("config: {}", config);
     
     // match py_sawtooth.call("main", (env!("CARGO_PKG_NAME"), py_args), ()) {
     //     Ok(_) => println!("Exiting..."),
@@ -54,6 +57,83 @@ fn run() -> Result<(), CliError> {
     Ok(())
 }
 
+fn load_validator_config(first_config: conf::ValidatorConfig,
+                         config_dir: &str)
+    -> Result<conf::ValidatorConfig, CliError>
+{
+    let mut config_path = PathBuf::new();
+    config_path.push(config_dir);
+    config_path.push("validator.toml");
+
+    let toml_config = conf::load_toml_validator_config(config_path.as_path())
+        .map_err(CliError::ConfigurationError)?;
+
+    Ok(conf::merge_validator_config(
+            &mut [first_config, toml_config, conf::ValidatorConfig::default()]))
+}
+
+
+fn create_validator_config(arg_matches: &ArgMatches)
+    -> Result<conf::ValidatorConfig, CliError>
+{
+    let mut bind_network = None;
+    let mut bind_component = None;
+
+    if let Some(bindings) = arg_matches.values_of("bind") {
+        for bind in  bindings {
+            if bind.starts_with("network") {
+                bind_network = Some(bind.split(":").skip(1).collect::<Vec<_>>().join(":"));
+            }
+
+            if bind.starts_with("component") {
+                bind_component = Some(bind.split(":").skip(1).collect::<Vec<_>>().join(":"));
+            }
+        }
+    }
+
+    Ok(conf::ValidatorConfig {
+        bind_network,
+        bind_component,
+        endpoint: arg_matches.value_of("endpoint").map(String::from),
+
+        scheduler: arg_matches.value_of("scheduler")
+            .map(|s| if s == "parallel" {
+                conf::SchedulerConfig::Parallel
+            } else {
+                conf::SchedulerConfig::Serial
+            }),
+        peering: arg_matches.value_of("peering")
+            .map(|s| if s == "dynamic" {
+                conf::PeeringConfig::Dynamic
+            } else {
+                conf::PeeringConfig::Static
+            }),
+        seeds: arg_matches.values_of("seeds").map(|vals| vals.map(String::from).collect()),
+        peers: arg_matches.values_of("peers").map(|vals| vals.map(String::from).collect()),
+        roles: arg_matches.value_of("network_auth")
+            .map(|s| if s == "challenge" {
+                conf::RolesConfig::Challenge
+            } else {
+                conf::RolesConfig::Trust
+            }),
+        opentsdb_url: arg_matches.value_of("opentsdb_url").map(String::from),
+        opentsdb_db: arg_matches.value_of("opentsdb_db").map(String::from),
+        minimum_peer_connectivity: usize_arg(&arg_matches, "minimum_peer_connectivity")?,
+        maximum_peer_connectivity: usize_arg(&arg_matches, "maximum_peer_connectivity")?,
+
+        ..conf::ValidatorConfig::empty()
+    })
+}
+
+fn usize_arg(arg_matches: &ArgMatches, arg_name: &str) -> Result<Option<usize>, CliError> {
+    Ok(match arg_matches.value_of(arg_name) {
+        Some(val) => Some(val.parse()
+                          .map_err(|_| CliError::ArgumentError(
+                                  format!("{} must be a positive integer",
+                                          arg_name)))?),
+        None => None
+    })
+}
 
 fn parse_args<'a>() -> ArgMatches<'a> {
     let app = App::new(DISTRIBUTION_NAME)
