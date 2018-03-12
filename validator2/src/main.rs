@@ -21,6 +21,7 @@ use conf::validator::{ValidatorConfig,
                       RolesConfig,
                       load_toml_validator_config,
                       merge_validator_config};
+use conf::path::load_path_config;
 use cli::error::CliError;
 
 const DISTRIBUTION_NAME: &'static str = "sawtooth-validator";
@@ -35,23 +36,21 @@ fn main() {
 fn run() -> Result<(), CliError> {
     // let args = parse_args();
 
-    let gil = Python::acquire_gil();
-    let python = gil.python();
-
     let matches = parse_args();
 
-    let py_sawtooth = load_py_module(python, "sawtooth_validator.server.cli")?;
+    // todo: Logging
 
-
-    let mut config_path = PathBuf::new();
-    config_path.push(matches.value_of("config_dir").unwrap_or(""));
-    config_path.push("validator.toml");
+    let path_config = load_path_config(matches.value_of("config_dir").map(String::from))?;
 
     let config = load_validator_config(
         create_validator_config(&matches)?,
-        matches.value_of("config_dir").unwrap_or(""))?;
+        path_config.config_dir.as_ref().unwrap())?;
 
     println!("config: {}", config);
+
+    let gil = Python::acquire_gil();
+    let python = gil.python();
+    let py_sawtooth = load_py_module(python, "sawtooth_validator.server.cli")?;
     
     // match py_sawtooth.call("main", (env!("CARGO_PKG_NAME"), py_args), ()) {
     //     Ok(_) => println!("Exiting..."),

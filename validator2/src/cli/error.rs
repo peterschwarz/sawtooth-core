@@ -13,3 +13,9 @@ pub enum CliError {
     /// An unknown python subsystem error
     PythonSystemError,
 }
+
+impl From<LocalConfigurationError> for CliError {
+    fn from(error: LocalConfigurationError) -> Self {
+        CliError::ConfigurationError(error)
+    }
+}
