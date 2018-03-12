@@ -14,6 +14,13 @@ use pyo3::{Python,
            ToPyPointer,
            ObjectProtocol};
 
+use conf::LocalConfigurationError;
+use conf::validator::{ValidatorConfig,
+                      PeeringConfig,
+                      SchedulerConfig,
+                      RolesConfig,
+                      load_toml_validator_config,
+                      merge_validator_config};
 use cli::error::CliError;
 
 const DISTRIBUTION_NAME: &'static str = "sawtooth-validator";
@@ -57,24 +64,24 @@ fn run() -> Result<(), CliError> {
     Ok(())
 }
 
-fn load_validator_config(first_config: conf::ValidatorConfig,
+fn load_validator_config(first_config: ValidatorConfig,
                          config_dir: &str)
-    -> Result<conf::ValidatorConfig, CliError>
+    -> Result<ValidatorConfig, CliError>
 {
     let mut config_path = PathBuf::new();
     config_path.push(config_dir);
     config_path.push("validator.toml");
 
-    let toml_config = conf::load_toml_validator_config(config_path.as_path())
+    let toml_config = load_toml_validator_config(config_path.as_path())
         .map_err(CliError::ConfigurationError)?;
 
-    Ok(conf::merge_validator_config(
-            &mut [first_config, toml_config, conf::ValidatorConfig::default()]))
+    Ok(merge_validator_config(
+            &mut [first_config, toml_config, ValidatorConfig::default()]))
 }
 
 
 fn create_validator_config(arg_matches: &ArgMatches)
-    -> Result<conf::ValidatorConfig, CliError>
+    -> Result<ValidatorConfig, CliError>
 {
     let mut bind_network = None;
     let mut bind_component = None;
@@ -91,37 +98,37 @@ fn create_validator_config(arg_matches: &ArgMatches)
         }
     }
 
-    Ok(conf::ValidatorConfig {
+    Ok(ValidatorConfig {
         bind_network,
         bind_component,
         endpoint: arg_matches.value_of("endpoint").map(String::from),
 
         scheduler: arg_matches.value_of("scheduler")
             .map(|s| if s == "parallel" {
-                conf::SchedulerConfig::Parallel
+                SchedulerConfig::Parallel
             } else {
-                conf::SchedulerConfig::Serial
+                SchedulerConfig::Serial
             }),
         peering: arg_matches.value_of("peering")
             .map(|s| if s == "dynamic" {
-                conf::PeeringConfig::Dynamic
+                PeeringConfig::Dynamic
             } else {
-                conf::PeeringConfig::Static
+                PeeringConfig::Static
             }),
         seeds: arg_matches.values_of("seeds").map(|vals| vals.map(String::from).collect()),
         peers: arg_matches.values_of("peers").map(|vals| vals.map(String::from).collect()),
         roles: arg_matches.value_of("network_auth")
             .map(|s| if s == "challenge" {
-                conf::RolesConfig::Challenge
+                RolesConfig::Challenge
             } else {
-                conf::RolesConfig::Trust
+                RolesConfig::Trust
             }),
         opentsdb_url: arg_matches.value_of("opentsdb_url").map(String::from),
         opentsdb_db: arg_matches.value_of("opentsdb_db").map(String::from),
         minimum_peer_connectivity: usize_arg(&arg_matches, "minimum_peer_connectivity")?,
         maximum_peer_connectivity: usize_arg(&arg_matches, "maximum_peer_connectivity")?,
 
-        ..conf::ValidatorConfig::empty()
+        ..ValidatorConfig::empty()
     })
 }
 
