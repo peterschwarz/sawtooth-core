@@ -1,6 +1,8 @@
 extern crate clap;
-extern crate pyo3;
 extern crate config;
+extern crate pyo3;
+#[macro_use]
+extern crate log;
 
 mod cli;
 mod conf;
@@ -12,9 +14,8 @@ use pyo3::{Python,
            PyResult,
            PyModule,
            ToPyPointer,
-           ObjectProtocol};
+           };
 
-use conf::LocalConfigurationError;
 use conf::validator::{ValidatorConfig,
                       PeeringConfig,
                       SchedulerConfig,
@@ -28,6 +29,7 @@ const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 fn main() {
     if let Err(err) = run() {
+        error!("Unable to start Sawtooth: {:?}", err);
         println!("Unable to start Sawtooth: {:?}", err);
     }
 }
@@ -37,17 +39,34 @@ fn run() -> Result<(), CliError> {
 
     let matches = parse_args();
 
-    // todo: Logging
+    // todo: Logging config
 
     let path_config = load_path_config(matches.value_of("config_dir").map(String::from))?;
 
-    let config = load_validator_config(
+    let validator_config = load_validator_config(
         create_validator_config(&matches)?,
         path_config.config_dir.as_ref().unwrap())?;
 
+    if validator_config.network_public_key.is_none() ||
+        validator_config.network_private_key.is_none()
+    {
+        warn!("Network key pair is not configured, Network \
+               communications between validators will not be \
+               authenticated or encrypted.")
+    }
+
+    check_directory(path_config.data_dir, "Data")?;
+    check_directory(path_config.log_dir, "Log")?;
+
+    debug!("Config: {}", validator_config);
+
     let gil = Python::acquire_gil();
     let python = gil.python();
-    let py_sawtooth = load_py_module(python, "sawtooth_validator.server.cli")?;
+    let py_sawtooth = load_py_module(python, "sawtooth_validator.server.core")?;
+    let py_keys = load_py_module(python, "sawtooth_validator.server.keys")?;
+
+    let py_pyformance = load_py_module(python, "pyformance")?;
+    let py_reporters = load_py_module(python, "pyformance")?;
     
     // match py_sawtooth.call("main", (env!("CARGO_PKG_NAME"), py_args), ()) {
     //     Ok(_) => println!("Exiting..."),
@@ -211,21 +230,27 @@ fn parse_args<'a>() -> ArgMatches<'a> {
     app.get_matches()
 }
 
-fn check_directory(path: &str, human_readable_name: &str) -> Result<(), CliError> {
-    let p = Path::new(path);
+fn check_directory(path: Option<String>, human_readable_name: &str) -> Result<(), CliError> {
+    if path.is_none() {
+        return Err(CliError::FileSystemError(
+                format!("{} directory is not set", human_readable_name)));
+    }
+
+    let path_str = path.as_ref().unwrap();
+    let p = Path::new(path_str);
 
     if !p.exists() {
         return Err(CliError::FileSystemError(
                 format!("{} directory does not exist: {}",
                         human_readable_name,
-                        path)))
+                        path_str)))
     }
 
     if !p.is_dir() {
         return Err(CliError::FileSystemError(
                 format!("{} directory is not a directory: {}",
                         human_readable_name,
-                        path)))
+                        path_str)))
     }
 
     if let Ok(metadata) = p.metadata() {
@@ -233,13 +258,13 @@ fn check_directory(path: &str, human_readable_name: &str) -> Result<(), CliError
             return Err(CliError::FileSystemError(
                     format!("{} directory is not writable: {}",
                             human_readable_name,
-                            path)))
+                            path_str)))
         }
     } else {
         return Err(CliError::FileSystemError(
                     format!("{} director has no meta data: {}",
                             human_readable_name,
-                            path)))
+                            path_str)))
     }
 
     Ok(())

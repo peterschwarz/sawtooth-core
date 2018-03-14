@@ -7,3 +7,4 @@ authors = ["Peter Schwarz <pschwarz@bitwise.io>"]
 clap = ">=2.29.0"
 pyo3 = "0.2"
 config = "0.8"
+log = "0.4"
