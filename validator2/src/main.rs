@@ -3,18 +3,15 @@ extern crate config;
 extern crate pyo3;
 #[macro_use]
 extern crate log;
+extern crate log4rs;
 
 mod cli;
 mod conf;
+mod py_bridge;
 
 use std::path::{Path};
 
 use clap::{Arg, App, ArgMatches};
-use pyo3::{Python,
-           PyResult,
-           PyModule,
-           ToPyPointer,
-           };
 
 use conf::validator::{ValidatorConfig,
                       PeeringConfig,
@@ -60,10 +57,9 @@ fn run() -> Result<(), CliError> {
 
     debug!("Config: {}", validator_config);
 
-    let gil = Python::acquire_gil();
-    let python = gil.python();
-    let py_sawtooth = load_py_module(python, "sawtooth_validator.server.core")?;
-    let py_keys = load_py_module(python, "sawtooth_validator.server.keys")?;
+    let (gil, python) = py_bridge::init();
+    let py_sawtooth = py_bridge::load_py_module(python, "sawtooth_validator.server.core")?;
+    let py_keys = py_bridge::load_py_module(python, "sawtooth_validator.server.keys")?;
 
     let py_pyformance = load_py_module(python, "pyformance")?;
     let py_reporters = load_py_module(python, "pyformance")?;
@@ -270,22 +266,3 @@ fn check_directory(path: Option<String>, human_readable_name: &str) -> Result<()
     Ok(())
 }
 
-// Python Briging Functions
-fn load_py_module<'p>(python: Python<'p>, module_name: &str) -> Result<&'p PyModule, CliError> {
-    python.import("sawtooth_validator.server.cli")
-        .map_err(|err| {
-             let traceback: String = if let Some(traceback) = err.ptraceback {
-                 match traceback.extract(python) {
-                     Ok(s) => s,
-                     Err(_) => return CliError::PythonSystemError
-                 }
-             } else {
-                 String::from("<No Traceback>")
-             };
-
-             CliError::PythonLoadError(
-                 format!("Unable to load {}\n{}",
-                         module_name,
-                         traceback))
-        })
-}
