@@ -10,8 +10,8 @@ mod conf;
 mod py_bridge;
 
 use std::path::{Path};
-
 use clap::{Arg, App, ArgMatches};
+use pyo3::Python;
 
 use conf::validator::{ValidatorConfig,
                       PeeringConfig,
@@ -57,12 +57,13 @@ fn run() -> Result<(), CliError> {
 
     debug!("Config: {}", validator_config);
 
-    let (gil, python) = py_bridge::init();
+    let gil = Python::acquire_gil();
+    let python = gil.python();
     let py_sawtooth = py_bridge::load_py_module(python, "sawtooth_validator.server.core")?;
     let py_keys = py_bridge::load_py_module(python, "sawtooth_validator.server.keys")?;
 
-    let py_pyformance = load_py_module(python, "pyformance")?;
-    let py_reporters = load_py_module(python, "pyformance")?;
+    let py_pyformance = py_bridge::load_py_module(python, "pyformance")?;
+    let py_reporters = py_bridge::load_py_module(python, "pyformance.reporters")?;
     
     // match py_sawtooth.call("main", (env!("CARGO_PKG_NAME"), py_args), ()) {
     //     Ok(_) => println!("Exiting..."),

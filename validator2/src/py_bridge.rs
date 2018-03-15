@@ -1,25 +1,19 @@
 use pyo3::{Python,
            PyResult,
            PyModule,
-           GILGuard,
            ToPyPointer,
            };
 
 
-pub fn init() -> (GILGuard, Python) {
-    let gil = Python::acquire_gil();
-    let python = gil.python();
-    (gil, python)
-}
 
 // Python Briging Functions
-pub fn load_py_module<'p>(python: Python<'p>, module_name: &str) -> Result<&'p PyModule, CliError> {
+pub fn load_py_module<'p>(python: Python<'p>, module_name: &str) -> Result<&'p PyModule, PythonBridgeError> {
     python.import("sawtooth_validator.server.cli")
         .map_err(|err| {
              let traceback: String = if let Some(traceback) = err.ptraceback {
                  match traceback.extract(python) {
                      Ok(s) => s,
-                     Err(_) => return CliError::PythonSystemError
+                     Err(_) => return PythonBridgeError::UnknownError
                  }
              } else {
                  String::from("<No Traceback>")
@@ -32,7 +26,9 @@ pub fn load_py_module<'p>(python: Python<'p>, module_name: &str) -> Result<&'p P
         })
 }
 
+#[derive(Debug)]
 pub enum PythonBridgeError 
 {
+    UnknownError,
     UnableToLoadModule(String)
 }
