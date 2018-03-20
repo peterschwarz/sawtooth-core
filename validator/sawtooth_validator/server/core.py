@@ -63,6 +63,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 class Validator(object):
+    @staticmethod
+    def view_config(config):
+        print(config.endpoint)
+
     def __init__(self,
                  bind_network,
                  bind_component,

@@ -1,3 +1,5 @@
+#![feature(proc_macro, specialization, const_fn)]
+
 extern crate clap;
 extern crate config;
 extern crate pyo3;
@@ -8,10 +10,11 @@ extern crate log4rs;
 mod cli;
 mod conf;
 mod py_bridge;
+mod logging;
 
 use std::path::{Path};
 use clap::{Arg, App, ArgMatches};
-use pyo3::Python;
+use pyo3::prelude::*;
 
 use conf::validator::{ValidatorConfig,
                       PeeringConfig,
@@ -55,23 +58,27 @@ fn run() -> Result<(), CliError> {
     check_directory(path_config.data_dir, "Data")?;
     check_directory(path_config.log_dir, "Log")?;
 
-    debug!("Config: {}", validator_config);
-
     let gil = Python::acquire_gil();
     let python = gil.python();
-    let py_sawtooth = py_bridge::load_py_module(python, "sawtooth_validator.server.core")?;
-    let py_keys = py_bridge::load_py_module(python, "sawtooth_validator.server.keys")?;
+    let py_validator = py_bridge::import_from(
+        python, "sawtooth_validator.server.core", "Validator")?;
+    let py_load_identity_signer = py_bridge::import_from(
+        python, "sawtooth_validator.server.keys", "load_identity_signer")?;
 
-    let py_pyformance = py_bridge::load_py_module(python, "pyformance")?;
-    let py_reporters = py_bridge::load_py_module(python, "pyformance.reporters")?;
-    
-    // match py_sawtooth.call("main", (env!("CARGO_PKG_NAME"), py_args), ()) {
-    //     Ok(_) => println!("Exiting..."),
-    //     Err(err) => {
-    //         eprintln!("Exiting with error {:?}", err);
-    //         err.print(python);
-    //     },
-    // };
+    let py_metrics_registry = py_bridge::import_from(
+        python, "pyformance", "MetricsRegistry")?;
+    let py_influx_reporter = py_bridge::import_from(
+        python, "pyformance.reporters", "InfluxReporter")?;
+    let py_state_verifyer = py_bridge::load_py_module(
+        python, "sawtooth_validator.server.state_verifier")?;
+
+    match py_validator.call_method1("view_config", (validator_config,)) {
+        Ok(_) => println!("Exiting..."),
+        Err(err) => {
+            eprintln!("Exiting with error {:?}", err);
+            err.print(python);
+        },
+    };
 
     Ok(())
 }
