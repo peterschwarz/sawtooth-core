@@ -299,7 +299,7 @@ class BlockValidator(object):
                 blkw.batches)
         return True
 
-    def validate_block(self, blkw, chain_head=None):
+    def validate_block(self, blkw):
         if blkw.status == BlockStatus.Valid:
             return
         elif blkw.status == BlockStatus.Invalid:
@@ -308,12 +308,6 @@ class BlockValidator(object):
 
         # pylint: disable=broad-except
         try:
-            if chain_head is None:
-                # Try to get the chain head from the block store; note that the
-                # block store may also return None for the chain head if a
-                # genesis block hasn't been committed yet.
-                chain_head = self._block_cache.block_store.chain_head
-
             try:
                 prev_state_root = self._get_previous_block_state_root(blkw)
             except KeyError:
@@ -352,16 +346,6 @@ class BlockValidator(object):
 
             self._validate_batches_in_block(blkw, prev_state_root)
 
-            # since changes to the chain-head can change the state of the
-            # blocks in BlockStore we have to revalidate this block.
-            block_store = self._block_cache.block_store
-
-            # The chain_head is None when this is the genesis block or if the
-            # block store has no chain_head.
-            if chain_head is not None:
-                if chain_head.identifier != block_store.chain_head.identifier:
-                    raise ChainHeadUpdated()
-
             blkw.status = BlockStatus.Valid
 
         except BlockValidationFailure as err:
@@ -371,9 +355,6 @@ class BlockValidator(object):
         except BlockValidationError as err:
             blkw.status = BlockStatus.Unknown
             raise err
-
-        except ChainHeadUpdated as e:
-            raise e
 
         except Exception as e:
             LOGGER.exception(
@@ -647,14 +628,16 @@ class BlockValidator(object):
             for blk in reversed(result.new_chain):
                 if valid:
                     try:
-                        self.validate_block(
-                            blk, chain_head)
+                        self.validate_block(blk)
+                        self._check_chain_head_updated(chain_head)
                     except BlockValidationFailure as err:
+                        self._check_chain_head_updated(chain_head)
                         LOGGER.warning(
                             'Block %s failed validation: %s',
                             blk, err)
                         valid = False
                     except BlockValidationError as err:
+                        self._check_chain_head_updated(chain_head)
                         LOGGER.error(
                             'Encountered an error while validating %s: %s',
                             blk, err)
@@ -716,3 +699,11 @@ class BlockValidator(object):
                 "Block validation failed with unexpected error: %s", block)
             # callback to clean up the block out of the processing list.
             callback(False, result)
+
+    def _check_chain_head_updated(self, chain_head):
+        # The chain_head is None when this is the genesis block
+        # or if the block store has no chain_head.
+        current_chain_head = self._block_cache.block_store.chain_head
+        if chain_head is not None:
+            if chain_head.identifier != current_chain_head.identifier:
+                raise ChainHeadUpdated()
