@@ -129,6 +129,8 @@ class ZmqService(Service):
             raise exceptions.ReceiveError(
                 'Failed with status {}'.format(status))
 
+        return response.block_id
+
     def cancel_block(self):
         request = consensus_pb2.ConsensusCancelBlockRequest()
 
