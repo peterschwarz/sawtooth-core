@@ -21,7 +21,7 @@ pub mod error;
 
 use state::error::StateDatabaseError;
 
-trait StateReader {
+pub trait StateReader {
     /// Returns true if the given address exists in State; false, otherwise.
     ///
     /// Will return a StateDatabaseError if there any errors occur while
