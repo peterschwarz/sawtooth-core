@@ -164,41 +164,47 @@ class BlockValidator(object):
 
         scheduler = None
         try:
-            chain_commit_state = ChainCommitState(
-                blkw.previous_block_id,
-                self._block_cache,
-                self._block_cache.block_store)
+            while True:
+                try:
+                    chain_head = self._block_cache.block_store.chain_head
+
+                    chain_commit_state = ChainCommitState(
+                        blkw.previous_block_id,
+                        self._block_cache,
+                        self._block_cache.block_store)
+
+                    chain_commit_state.check_for_duplicate_batches(
+                        blkw.block.batches)
+
+                    transactions = []
+                    for batch in blkw.block.batches:
+                        transactions.extend(batch.transactions)
+
+                    chain_commit_state.check_for_duplicate_transactions(
+                        transactions)
+
+                    chain_commit_state.check_for_transaction_dependencies(
+                        transactions)
+
+                    if not self._check_chain_head_updated(chain_head):
+                        break
+
+                except (DuplicateBatch,
+                        DuplicateTransaction,
+                        MissingDependency) as err:
+                    if not self._check_chain_head_updated(chain_head):
+                        raise BlockValidationFailure(
+                            "Block {} failed validation: {}".format(blkw, err))
 
             scheduler = self._transaction_executor.create_scheduler(
                 self._squash_handler, prev_state_root)
             self._transaction_executor.execute(scheduler)
-
-            chain_commit_state.check_for_duplicate_batches(
-                blkw.block.batches)
-
-            transactions = []
-            for batch in blkw.block.batches:
-                transactions.extend(batch.transactions)
-
-            chain_commit_state.check_for_duplicate_transactions(
-                transactions)
-
-            chain_commit_state.check_for_transaction_dependencies(
-                transactions)
 
             for batch, has_more in look_ahead(blkw.block.batches):
                 if has_more:
                     scheduler.add_batch(batch)
                 else:
                     scheduler.add_batch(batch, blkw.state_root_hash)
-
-        except (DuplicateBatch,
-                DuplicateTransaction,
-                MissingDependency) as err:
-            if scheduler is not None:
-                scheduler.cancel()
-            raise BlockValidationFailure(
-                "Block {} failed validation: {}".format(blkw, err))
 
         except Exception:
             if scheduler is not None:
@@ -229,6 +235,29 @@ class BlockValidator(object):
                 "Block {} failed state root hash validation. Expected {}"
                 " but got {}".format(
                     blkw, blkw.state_root_hash, state_hash))
+
+    def _check_chain_head_updated(self, chain_head):
+        # The validity of blocks depends partially on whether or not
+        # there are any duplicate transactions or batches in the block.
+        # This can only be checked accurately if the block store does
+        # not update during validation. The current practice is the
+        # assume this will not happen and, if it does, to reprocess the
+        # validation. This has been experimentally proven to be more
+        # performant than locking the chain head and block store around
+        # duplicate checking.
+        if chain_head is None:
+            return False
+
+        current_chain_head = self._block_cache.block_store.chain_head
+        if chain_head.identifier != current_chain_head.identifier:
+            LOGGER.warning(
+                "Chain head updated from %s to %s while checking "
+                "duplicates and dependencies in block %s. "
+                "Reprocessing validation.",
+                chain_head, current_chain_head, block)
+            return True
+
+        return False
 
     def _validate_permissions(self, blkw, prev_state_root):
         """
@@ -391,41 +420,19 @@ class BlockValidator(object):
         be the new head block. Returns the results to the ChainController
         so that the change over can be made if necessary.
         """
-        while True:
-            chain_head = self._block_cache.block_store.chain_head
-            try:
-                self.validate_block(block)
-                LOGGER.info(
-                    'Block %s passed validation', block)
-            except BlockValidationFailure as err:
-                LOGGER.warning(
-                    'Block %s failed validation: %s', block, err)
-            except BlockValidationError as err:
-                LOGGER.error(
-                    'Encountered an error while validating %s: %s', block, err)
-            except Exception:  # pylint: disable=broad-except
-                LOGGER.exception(
-                    "Block validation failed with unexpected error: %s", block)
-
-            # The validity of blocks depends partially on whether or not there
-            # are any duplicate transactions or batches in the block. This can
-            # only be checked accurately if the block store does not update
-            # during validation. The current practice is the assume this will
-            # not happen and, if it does, to reprocess the validation. This
-            # has been experimentally proven to be more performant than locking
-            # the chain head and block store around duplicate checking.
-            if chain_head is None:
-                break
-            else:
-                current_chain_head = self._block_cache.block_store.chain_head
-                if chain_head.identifier == current_chain_head.identifier:
-                    break
-                else:
-                    LOGGER.warning(
-                        "Chain head updated from %s to %s while validating"
-                        " block %s. Reprocessing validation.",
-                        chain_head, current_chain_head, block)
-                    block.status = BlockStatus.Unknown
+        try:
+            self.validate_block(block)
+            LOGGER.info(
+                'Block %s passed validation', block)
+        except BlockValidationFailure as err:
+            LOGGER.warning(
+                'Block %s failed validation: %s', block, err)
+        except BlockValidationError as err:
+            LOGGER.error(
+                'Encountered an error while validating %s: %s', block, err)
+        except Exception:  # pylint: disable=broad-except
+            LOGGER.exception(
+                "Block validation failed with unexpected error: %s", block)
 
         try:
             blocks_now_ready = self._release_pending(block)
