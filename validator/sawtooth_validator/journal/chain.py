@@ -250,70 +250,98 @@ class ChainController(object):
                 return
 
             with self._lock:
-                commit_new_block, result = self._resolve_fork(block)
                 self._blocks_considered_count.inc()
-                new_block = result.block
 
-                # If the head is to be updated to the new block.
-                if commit_new_block:
-                    with self._chain_head_lock:
-                        self._chain_head = new_block
+                while True:
+                    # Get the current chain_head
+                    chain_head = self._block_cache.block_store.chain_head
 
-                        # update the the block store to have the new chain
-                        self._block_store.update_chain(result.new_chain,
-                                                       result.current_chain)
+                    commit_new_block, result = self._resolve_fork(
+                        block, chain_head)
 
-                        LOGGER.info(
-                            "Chain head updated to: %s",
-                            self._chain_head)
+                    # If the head is to be updated to the new block.
+                    if commit_new_block:
+                        with self._chain_head_lock:
+                            if self._check_chain_head_updated(chain_head):
+                                continue
 
-                        self._chain_head_gauge.set_value(
-                            self._chain_head.identifier[:8])
+                            self._chain_head = block
 
-                        self._committed_transactions_gauge.set_value(
-                            self._block_store.get_transaction_count())
+                            # update the the block store to have the new chain
+                            self._block_store.update_chain(result.new_chain,
+                                                           result.current_chain)
 
-                        self._committed_transactions_count.inc(
-                            result.transaction_count)
+                            LOGGER.info(
+                                "Chain head updated to: %s",
+                                self._chain_head)
 
-                        self._block_num_gauge.set_value(
-                            self._chain_head.block_num)
+                            self._chain_head_gauge.set_value(
+                                self._chain_head.identifier[:8])
 
-                        # tell the BlockPublisher else the chain is updated
-                        self._notify_on_chain_updated(
-                            self._chain_head,
-                            result.committed_batches,
-                            result.uncommitted_batches)
+                            self._committed_transactions_gauge.set_value(
+                                self._block_store.get_transaction_count())
 
-                        for batch in new_block.batches:
-                            if batch.trace:
-                                LOGGER.debug("TRACE %s: %s",
-                                             batch.header_signature,
-                                             self.__class__.__name__)
+                            self._committed_transactions_count.inc(
+                                result.transaction_count)
 
-                    for blk in reversed(result.new_chain):
-                        receipts = self._make_receipts(blk.execution_results)
-                        # Update all chain observers
-                        for observer in self._chain_observers:
-                            observer.chain_update(blk, receipts)
+                            self._block_num_gauge.set_value(
+                                self._chain_head.block_num)
 
-                # The block is otherwise valid, but we have determined we
-                # don't want it as the chain head.
-                else:
-                    LOGGER.info('Rejected new chain head: %s', new_block)
+                            # tell the BlockPublisher else the chain is updated
+                            self._notify_on_chain_updated(
+                                self._chain_head,
+                                result.committed_batches,
+                                result.uncommitted_batches)
+
+                            for batch in block.batches:
+                                if batch.trace:
+                                    LOGGER.debug("TRACE %s: %s",
+                                                 batch.header_signature,
+                                                 self.__class__.__name__)
+
+                        for blk in reversed(result.new_chain):
+                            receipts = self._make_receipts(blk.execution_results)
+                            # Update all chain observers
+                            for observer in self._chain_observers:
+                                observer.chain_update(blk, receipts)
+
+                    # The block is otherwise valid, but we have determined we
+                    # don't want it as the chain head.
+                    else:
+                        LOGGER.info('Rejected new chain head: %s', block)
+
+                    break
 
         # pylint: disable=broad-except
         except Exception:
             LOGGER.exception(
                 "Unhandled exception in ChainController.on_block_validated()")
 
-    def _resolve_fork(self, block):
+    def _check_chain_head_updated(self, chain_head):
+        # The validity of blocks depends partially on whether or not
+        # there are any duplicate transactions or batches in the block.
+        # This can only be checked accurately if the block store does
+        # not update during validation. The current practice is the
+        # assume this will not happen and, if it does, to reprocess the
+        # validation. This has been experimentally proven to be more
+        # performant than locking the chain head and block store around
+        # duplicate checking.
+        if chain_head is None:
+            return False
+
+        current_chain_head = self._block_cache.block_store.chain_head
+        if chain_head.identifier != current_chain_head.identifier:
+            LOGGER.warning(
+                "Chain head updated from %s to %s while resolving"
+                " fork for block %s. Reprocessing resolution.",
+            chain_head, current_chain_head, block)
+            return True
+
+        return False
+
+    def _resolve_fork(self, block, chain_head):
         result = ForkResolutionResult(block)
         LOGGER.info("Starting fork resolution of : %s", block)
-
-        # Get the current chain_head and store it in the result
-        chain_head = self._block_cache.block_store.chain_head
-        result.chain_head = chain_head
 
         # Create new local variables for current and new block, since
         # these variables get modified later
@@ -337,6 +365,7 @@ class ChainController(object):
             self._extend_fork_diff_to_common_ancestor(
                 new_block, current_block,
                 result.new_chain, result.current_chain)
+
         except ForkResolutionError as err:
             LOGGER.error(
                 'Encountered an error while resolving a fork with head %s:'
