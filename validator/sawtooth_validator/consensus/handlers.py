@@ -295,7 +295,7 @@ class ConsensusBlocksGetHandler(ConsensusServiceHandler):
     def handle_request(self, request, response):
         try:
             response.blocks = self._proxy.blocks_get(request.block_ids)
-        except KeyError:
+        except UnknownBlock:
             response.status =\
                 consensus_pb2.ConsensusBlocksGetResponse.UNKNOWN_BLOCK
         except Exception:  # pylint: disable=broad-except
