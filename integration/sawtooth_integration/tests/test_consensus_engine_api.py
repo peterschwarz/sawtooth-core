@@ -42,6 +42,8 @@ class TestConsensusEngineAPI(unittest.TestCase):
         self.stream.close()
 
     def test_consensus_engine_api(self):
+        chain_head = self.head()
+
         batches = make_batches(BATCH_KEYS)
         committed = 0
 
@@ -131,6 +133,19 @@ class TestConsensusEngineAPI(unittest.TestCase):
             result.message_type,
             validator_pb2.Message.CONSENSUS_COMMIT_BLOCK_RESPONSE)
         response = consensus_pb2.ConsensusCommitBlockResponse()
+        response.ParseFromString(result.content)
+        return response.status
+
+    def head(self):
+        future = self.stream.send(
+            validator_pb2.Message.CONSENSUS_CHAIN_HEAD_GET_REQUEST,
+            consensus_pb2.ConsensusChainHeadGetRequest()
+                         .SerializeToString())
+        result = future.result()
+        self.assertEqual(
+            result.message_type,
+            validator_pb2.Message.CONSENSUS_CHAIN_HEAD_GET_RESPONSE)
+        response = consensus_pb2.ConsensusChainHeadGetResponse()
         response.ParseFromString(result.content)
         return response.status
 
