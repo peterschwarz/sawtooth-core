@@ -15,6 +15,10 @@
 
 import logging
 
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusSettingsEntry
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusStateEntry
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -26,10 +30,13 @@ class ConsensusProxy:
     """Receives requests from the consensus engine handlers and delegates them
     to the appropriate components."""
 
-    def __init__(self, block_cache, chain_controller, block_publisher):
+    def __init__(self, block_cache, chain_controller, block_publisher,
+                 settings_view_factory, state_view_factory):
         self._block_cache = block_cache
         self._chain_controller = chain_controller
         self._block_publisher = block_publisher
+        self._settings_view_factory = settings_view_factory
+        self._state_view_factory = state_view_factory
 
     # Using network service
     def send_to(self, peer_id, message):
@@ -78,10 +85,54 @@ class ConsensusProxy:
 
     # Using blockstore and state database
     def blocks_get(self, block_ids):
-        raise NotImplementedError()
+        '''Returns a list of consensus blocks.'''
+
+        blocks = self._get_blocks(*block_ids)
+
+        return [
+            ConsensusBlock(
+                block_id=block.identifier,
+                previous_id=block.previous_block_id,
+                signer_id=block.header_signature,
+                block_num=block.block_num,
+                payload=block.consensus)
+            for block in blocks
+        ]
 
     def settings_get(self, block_id, settings):
-        raise NotImplementedError()
+        settings_view = \
+            self._get_blocks(block_id).get_settings_view(
+                self._settings_view_factory)
+
+        return [
+            ConsensusSettingsEntry(
+                key=setting,
+                value=settings_view.get_setting(setting))
+            for setting in settings
+        ]
 
     def state_get(self, block_id, addresses):
-        raise NotImplementedError()
+        '''Returns a list of consensus state entries.'''
+
+        state_view = \
+            self._get_blocks(block_id).get_state_view(
+                self._state_view_factory)
+
+        return [
+            ConsensusStateEntry(
+                address=address,
+                data=state_view.get(address))
+            for address in addresses
+        ]
+
+    def _get_blocks(self, *block_ids):
+        try:
+            if len(block_ids) == 1:
+                return self._block_cache[block_ids[0].hex()]
+
+            return [
+                self._block_cache[block_id.hex()]
+                for block_id in block_ids
+            ]
+        except KeyError:
+            raise UnknownBlock()

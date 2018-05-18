@@ -18,6 +18,8 @@ import logging
 
 from google.protobuf.message import DecodeError
 
+from sawtooth_validator.consensus.proxy import UnknownBlock
+
 from sawtooth_validator.protobuf import consensus_pb2
 from sawtooth_validator.protobuf import validator_pb2
 
@@ -261,7 +263,14 @@ class ConsensusBlocksGetHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.blocks_get(request.block_ids)
+        try:
+            response.blocks = self._proxy.blocks_get(request.block_ids)
+        except KeyError:
+            response.status =\
+                consensus_pb2.ConsensusBlocksGetResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusBlocksGetResponse.SERVICE_ERROR
 
 
 class ConsensusSettingsGetHandler(ConsensusServiceHandler):
@@ -275,7 +284,15 @@ class ConsensusSettingsGetHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.settings_get(request.block_id, request.keys)
+        try:
+            response.keys = self._proxy.settings_get(
+                request.block_id, request.keys)
+        except UnknownBlock:
+            response.status = \
+                consensus_pb2.ConsensusSettingsGetResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusSettingsGetResponse.SERVICE_ERROR
 
 
 class ConsensusStateGetHandler(ConsensusServiceHandler):
@@ -289,4 +306,12 @@ class ConsensusStateGetHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.state_get(request.block_id, request.addresses)
+        try:
+            response.entries = self._proxy.state_get(
+                request.block_id, request.addresses)
+        except UnknownBlock:
+            response.status = \
+                consensus_pb2.ConsensusStateGetResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusStateGetResponse.SERVICE_ERROR

@@ -6,6 +6,10 @@ from sawtooth_validator.consensus.proxy import ConsensusProxy
 
 from sawtooth_validator.journal.publisher import FinalizeBlockResult
 
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusSettingsEntry
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusStateEntry
+
 
 class TestHandlers(unittest.TestCase):
 
@@ -143,10 +147,14 @@ class TestProxy(unittest.TestCase):
         self._mock_block_cache = {}
         self._mock_block_publisher = Mock()
         self._mock_chain_controller = Mock()
+        self._mock_settings_view_factory = Mock()
+        self._mock_state_view_factory = Mock()
         self._proxy = ConsensusProxy(
             block_cache=self._mock_block_cache,
             chain_controller=self._mock_chain_controller,
-            block_publisher=self._mock_block_publisher)
+            block_publisher=self._mock_block_publisher,
+            settings_view_factory=self._mock_settings_view_factory,
+            state_view_factory=self._mock_state_view_factory)
 
     def test_send_to(self):
         with self.assertRaises(NotImplementedError):
@@ -204,13 +212,82 @@ class TestProxy(unittest.TestCase):
 
     # Using blockstore and state database
     def test_blocks_get(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.blocks_get(None)
+        self._mock_block_cache[b'block1'.hex()] = Mock(
+            identifier=b'id-1',
+            previous_block_id=b'prev-1',
+            header_signature=b'sign-1',
+            block_num=1,
+            consensus=b'consensus')
+
+        self._mock_block_cache[b'block2'.hex()] = Mock(
+            identifier=b'id-2',
+            previous_block_id=b'prev-2',
+            header_signature=b'sign-2',
+            block_num=2,
+            consensus=b'consensus')
+
+        block_1, block_2 = self._proxy.blocks_get([b'block1', b'block2'])
+
+        self.assertEqual(
+            block_1,
+            ConsensusBlock(
+                block_id=b'id-1',
+                previous_id=b'prev-1',
+                signer_id=b'sign-1',
+                block_num=1,
+                payload=b'consensus'))
+
+        self.assertEqual(
+            block_2,
+            ConsensusBlock(
+                block_id=b'id-2',
+                previous_id=b'prev-2',
+                signer_id=b'sign-2',
+                block_num=2,
+                payload=b'consensus'))
 
     def test_settings_get(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.settings_get(None, None)
+        self._mock_block_cache[b'block'.hex()] = MockBlock()
+
+        self.assertEqual(
+            self._proxy.settings_get(b'block', ['key1', 'key2']),
+            [
+                ConsensusSettingsEntry(
+                    key='key1',
+                    value='mock-key1'),
+                ConsensusSettingsEntry(
+                    key='key2',
+                    value='mock-key2')
+            ])
 
     def test_state_get(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.state_get(None, None)
+        self._mock_block_cache[b'block'.hex()] = MockBlock()
+
+        self.assertEqual(
+            self._proxy.state_get(b'block', ['address-1', 'address-2']),
+            [
+                ConsensusStateEntry(
+                    address='address-1',
+                    data=b'mock-address-1'),
+                ConsensusStateEntry(
+                    address='address-2',
+                    data=b'mock-address-2')
+            ])
+
+
+class MockBlock:
+    def get_state_view(self, state_view_factory):
+        return MockStateView()
+
+    def get_settings_view(self, settings_view_factory):
+        return MockSettingsView()
+
+
+class MockStateView:
+    def get(self, address):
+        return 'mock-{}'.format(address).encode()
+
+
+class MockSettingsView:
+    def get_setting(self, key):
+        return 'mock-{}'.format(key)
