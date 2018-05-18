@@ -31,6 +31,8 @@ from sawtooth_validator.journal.publisher_ce import BlockEmpty
 from sawtooth_validator.journal.publisher_ce import BlockInProgress
 from sawtooth_validator.journal.publisher_ce import BlockNotInitialized
 
+from sawtooth_validator.consensus.proxy import UnknownBlock
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -161,7 +163,7 @@ class ConsensusFinalizeBlockHandler(ConsensusServiceHandler):
     def handle_request(self, request, response):
         try:
             self._proxy.finalize_block(request.data)
-        except KeyError:
+        except UnknownBlock:
             response.status =\
                 consensus_pb2.ConsensusFinalizeBlockResponse.UNKNOWN_BLOCK
         except BlockNotInitialized:
