@@ -41,8 +41,8 @@ impl DevmodeService {
 
     fn get_block(&mut self, block_id: BlockId) -> Block {
         self.service
-            .get_blocks(vec![block_id])
-            .expect("Failed to get block")[0]
+            .get_blocks(vec![block_id.clone()])
+            .expect("Failed to get block").get(&block_id).unwrap()
             .clone()
     }
 
@@ -96,8 +96,11 @@ impl DevmodeService {
                 String::from("sawtooth.consensus.max_wait_time"),
             ],
         ) {
-            Ok(setting_strings) => {
-                let ints: Vec<u64> = setting_strings
+            Ok(settings) => {
+                let ints: Vec<u64> = vec!(
+                    settings.get("sawtooth.consensus.min_wait_time").unwrap(),
+                    settings.get("sawtooth.consensus.max_wait_time").unwrap(),
+                )
                     .iter()
                     .map(|string| string.parse::<u64>())
                     .map(|result| result.unwrap_or(0))
