@@ -17,6 +17,7 @@
 
 pub const NULL_BLOCK_IDENTIFIER: &str = "0000000000000000";
 
+pub mod chain;
 pub mod block_manager;
 pub mod block_store;
 mod chain_commit_state;
