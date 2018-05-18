@@ -15,6 +15,7 @@
  * ------------------------------------------------------------------------------
  */
 
+use std::cmp::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time;
 
@@ -133,7 +134,7 @@ impl Engine for DevmodeEngine {
         let mut service = DevmodeService::new(service);
 
         let mut chain_head = service.get_chain_head();
-        let mut wait_time = service.calculate_wait_time(chain_head.block_id);
+        let mut wait_time = service.calculate_wait_time(chain_head.block_id.clone());
         let mut start = time::Instant::now();
 
         service.initialize_block();
@@ -143,7 +144,7 @@ impl Engine for DevmodeEngine {
                 service.finalize_block();
 
                 chain_head = service.get_chain_head();
-                wait_time = service.calculate_wait_time(chain_head.block_id);
+                wait_time = service.calculate_wait_time(chain_head.block_id.clone());
                 start = time::Instant::now();
 
                 service.initialize_block();
@@ -165,10 +166,16 @@ impl Engine for DevmodeEngine {
                         let block = service.get_block(block_id.clone());
 
                         // Advance the chain if possible.
-                        if block.block_num > chain_head.block_num {
-                            service.commit_block(block_id);
-                        } else {
-                            service.ignore_block(block_id)
+                        match block.block_num.cmp(&chain_head.block_num) {
+                            Ordering::Greater => service.commit_block(block_id),
+                            Ordering::Less => service.ignore_block(block_id),
+                            Ordering::Equal => {
+                                if block.block_id > chain_head.block_id {
+                                    service.commit_block(block_id)
+                                } else {
+                                    service.ignore_block(block_id)
+                                }
+                            }
                         }
                     }
 
@@ -178,7 +185,7 @@ impl Engine for DevmodeEngine {
                         service.cancel_block();
 
                         chain_head = service.get_chain_head();
-                        wait_time = service.calculate_wait_time(chain_head.block_id);
+                        wait_time = service.calculate_wait_time(chain_head.block_id.clone());
                         start = time::Instant::now();
 
                         service.initialize_block();

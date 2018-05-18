@@ -32,7 +32,7 @@ pub enum Update {
     BlockCommit(BlockId),
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq, PartialOrd)]
 pub struct BlockId(Vec<u8>);
 impl Deref for BlockId {
     type Target = Vec<u8>;
