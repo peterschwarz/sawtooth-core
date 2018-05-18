@@ -400,7 +400,8 @@ class Validator(object):
             consensus_proxy = ConsensusProxy(
                 block_cache=block_cache,
                 chain_controller=chain_controller,
-                block_publisher=block_publisher)
+                block_publisher=block_publisher,
+                state_view_factory=state_view_factory)
 
             consensus_handlers.add(
                 consensus_dispatcher, consensus_thread_pool, consensus_proxy)

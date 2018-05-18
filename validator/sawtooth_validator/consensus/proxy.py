@@ -16,6 +16,7 @@
 import logging
 
 from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusStateEntry
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,10 +29,12 @@ class ConsensusProxy:
     """Receives requests from the consensus engine handlers and delegates them
     to the appropriate components."""
 
-    def __init__(self, block_cache, chain_controller, block_publisher):
+    def __init__(self, block_cache, chain_controller, block_publisher,
+                 state_view_factory):
         self._block_cache = block_cache
         self._chain_controller = chain_controller
         self._block_publisher = block_publisher
+        self._state_view_factory = state_view_factory
 
     # Using network service
     def send_to(self, peer_id, message):
@@ -98,12 +101,22 @@ class ConsensusProxy:
         raise NotImplementedError()
 
     def state_get(self, block_id, addresses):
-        raise NotImplementedError()
+        '''Returns a list of consensus state entries.'''
+
+        state_view = \
+            self._get_blocks(block_id).get_state_view(self._state_view_factory)
+
+        return [
+            ConsensusStateEntry(
+                address=address,
+                data=state_view.get(address))
+            for address in addresses
+        ]
 
     def _get_blocks(self, *block_ids):
         try:
             if len(block_ids) == 1:
-                return self._block_cache[block_ids[0]]
+                return self._block_cache[block_ids[0].hex()]
 
             return [
                 self._block_cache[block_id.hex()]

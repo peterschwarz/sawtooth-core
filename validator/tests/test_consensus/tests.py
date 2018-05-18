@@ -7,6 +7,7 @@ from sawtooth_validator.consensus.proxy import ConsensusProxy
 from sawtooth_validator.journal.publisher import FinalizeBlockResult
 
 from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusStateEntry
 
 
 class TestHandlers(unittest.TestCase):
@@ -145,10 +146,12 @@ class TestProxy(unittest.TestCase):
         self._mock_block_cache = {}
         self._mock_block_publisher = Mock()
         self._mock_chain_controller = Mock()
+        self._mock_state_view_factory = Mock()
         self._proxy = ConsensusProxy(
             block_cache=self._mock_block_cache,
             chain_controller=self._mock_chain_controller,
-            block_publisher=self._mock_block_publisher)
+            block_publisher=self._mock_block_publisher,
+            state_view_factory=self._mock_state_view_factory)
 
     def test_send_to(self):
         with self.assertRaises(NotImplementedError):
@@ -245,5 +248,25 @@ class TestProxy(unittest.TestCase):
             self._proxy.settings_get(None, None)
 
     def test_state_get(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.state_get(None, None)
+        self._mock_block_cache[b'block'.hex()] = MockBlock()
+
+        self.assertEqual(
+            self._proxy.state_get(b'block', ['address-1', 'address-2']),
+            [
+                ConsensusStateEntry(
+                    address='address-1',
+                    data=b'mock-address-1'),
+                ConsensusStateEntry(
+                    address='address-2',
+                    data=b'mock-address-2')
+            ])
+
+
+class MockBlock:
+    def get_state_view(self, state_view_factory):
+        return MockStateView()
+
+
+class MockStateView:
+    def get(self, address):
+        return 'mock-{}'.format(address).encode()

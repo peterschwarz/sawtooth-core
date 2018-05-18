@@ -298,4 +298,12 @@ class ConsensusStateGetHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.state_get(request.block_id, request.addresses)
+        try:
+            response.entries = self._proxy.state_get(
+                request.block_id, request.addresses)
+        except UnknownBlock:
+            response.status = \
+                consensus_pb2.ConsensusStateGetResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusStateGetResponse.SERVICE_ERROR
