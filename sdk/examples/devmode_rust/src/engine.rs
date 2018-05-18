@@ -118,7 +118,7 @@ impl DevmodeService {
                 let min_wait_time: u64 = ints[0];
                 let max_wait_time: u64 = ints[1];
 
-                if min_wait_time > max_wait_time {
+                if min_wait_time >= max_wait_time {
                     return time::Duration::new(0, 0);
                 }
 
