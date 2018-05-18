@@ -171,7 +171,7 @@ class BlockWrapper(object):
             block_wrapper.state_root_hash \
             if block_wrapper is not None else None
 
-        return settings_view_factory.create_view(state_root_hash)
+        return settings_view_factory.create_settings_view(state_root_hash)
 
     def get_settings_view(self, settings_view_factory):
         """
