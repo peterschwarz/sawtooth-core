@@ -150,6 +150,7 @@ class ConsensusInitializeBlockHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusInitializeBlockResponse.INVALID_STATE
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusInitializeBlock")
             response.status =\
                 consensus_pb2.ConsensusInitializeBlockResponse.SERVICE_ERROR
 
@@ -177,6 +178,7 @@ class ConsensusFinalizeBlockHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusFinalizeBlockResponse.BLOCK_NOT_READY
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusFinalizeBlock")
             response.status =\
                 consensus_pb2.ConsensusFinalizeBlockResponse.SERVICE_ERROR
 
@@ -198,6 +200,7 @@ class ConsensusCancelBlockHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusCancelBlockResponse.INVALID_STATE
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusCancelBlock")
             response.status =\
                 consensus_pb2.ConsensusCancelBlockResponse.SERVICE_ERROR
 
@@ -219,6 +222,7 @@ class ConsensusCheckBlocksHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusCheckBlocksResponse.UNKNOWN_BLOCK
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusCheckBlocks")
             response.status =\
                 consensus_pb2.ConsensusCheckBlocksResponse.SERVICE_ERROR
 
@@ -240,6 +244,7 @@ class ConsensusCommitBlockHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusCommitBlockResponse.UNKNOWN_BLOCK
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusCommitBlock")
             response.status =\
                 consensus_pb2.ConsensusCommitBlockResponse.SERVICE_ERROR
 
@@ -261,6 +266,7 @@ class ConsensusIgnoreBlockHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusIgnoreBlockResponse.UNKNOWN_BLOCK
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusIgnoreBlock")
             response.status =\
                 consensus_pb2.ConsensusIgnoreBlockResponse.SERVICE_ERROR
 
@@ -282,6 +288,7 @@ class ConsensusFailBlockHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusFailBlockResponse.UNKNOWN_BLOCK
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusFailBlock")
             response.status =\
                 consensus_pb2.ConsensusFailBlockResponse.SERVICE_ERROR
 
@@ -311,6 +318,7 @@ class ConsensusBlocksGetHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusBlocksGetResponse.UNKNOWN_BLOCK
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusBlocksGet")
             response.status =\
                 consensus_pb2.ConsensusBlocksGetResponse.SERVICE_ERROR
 
@@ -337,6 +345,7 @@ class ConsensusChainHeadGetHandler(ConsensusServiceHandler):
             response.status =\
                 consensus_pb2.ConsensusChainHeadGetResponse.NO_CHAIN_HEAD
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusChainHeadGet")
             response.status =\
                 consensus_pb2.ConsensusChainHeadGetResponse.SERVICE_ERROR
 
@@ -364,6 +373,7 @@ class ConsensusSettingsGetHandler(ConsensusServiceHandler):
             response.status = \
                 consensus_pb2.ConsensusSettingsGetResponse.UNKNOWN_BLOCK
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusSettingsGet")
             response.status =\
                 consensus_pb2.ConsensusSettingsGetResponse.SERVICE_ERROR
 
@@ -391,5 +401,6 @@ class ConsensusStateGetHandler(ConsensusServiceHandler):
             response.status = \
                 consensus_pb2.ConsensusStateGetResponse.UNKNOWN_BLOCK
         except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusStateGet")
             response.status =\
                 consensus_pb2.ConsensusStateGetResponse.SERVICE_ERROR
