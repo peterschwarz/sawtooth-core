@@ -209,7 +209,14 @@ class ConsensusCheckBlocksHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.check_block(request.block_ids)
+        try:
+            self._proxy.check_blocks(request.block_ids)
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusCheckBlocksResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusCheckBlocksResponse.SERVICE_ERROR
 
 
 class ConsensusCommitBlockHandler(ConsensusServiceHandler):
@@ -223,7 +230,14 @@ class ConsensusCommitBlockHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.commit_block(request.block_id)
+        try:
+            self._proxy.commit_block(request.block_id)
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusCommitBlockResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusCommitBlockResponse.SERVICE_ERROR
 
 
 class ConsensusIgnoreBlockHandler(ConsensusServiceHandler):
@@ -237,7 +251,14 @@ class ConsensusIgnoreBlockHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.ignore_block(request.block_id)
+        try:
+            self._proxy.ignore_block(request.block_id)
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusIgnoreBlockResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusIgnoreBlockResponse.SERVICE_ERROR
 
 
 class ConsensusFailBlockHandler(ConsensusServiceHandler):
@@ -251,7 +272,14 @@ class ConsensusFailBlockHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.fail_block(request.block_id)
+        try:
+            self._proxy.fail_block(request.block_id)
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusFailBlockResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusFailBlockResponse.SERVICE_ERROR
 
 
 class ConsensusBlocksGetHandler(ConsensusServiceHandler):
