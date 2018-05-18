@@ -129,6 +129,8 @@ class ZmqService(Service):
             raise exceptions.ReceiveError(
                 'Failed with status {}'.format(status))
 
+        return response.block_id
+
     def cancel_block(self):
         request = consensus_pb2.ConsensusCancelBlockRequest()
 
@@ -252,6 +254,27 @@ class ZmqService(Service):
             block.block_id: Block(block)
             for block in response.blocks
         }
+
+    def get_chain_head(self):
+        request = consensus_pb2.ConsensusChainHeadGetRequest()
+
+        response_type = consensus_pb2.ConsensusChainHeadGetResponse
+
+        response = self._send(
+            request=request,
+            message_type=Message.CONSENSUS_CHAIN_HEAD_GET_REQUEST,
+            response_type=response_type)
+
+        status = response.status
+
+        if status == response_type.NO_CHAIN_HEAD:
+            raise exceptions.NoChainHead()
+
+        if status != response_type.OK:
+            raise exceptions.ReceiveError(
+                'Failed with status {}'.format(status))
+
+        return response.block
 
     def get_settings(self, block_id, settings):
         request = consensus_pb2.ConsensusSettingsGetRequest(

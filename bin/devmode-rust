@@ -1,3 +1,5 @@
+#!/bin/bash
+#
 # Copyright 2018 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,27 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # -----------------------------------------------------------------------------
+top_dir=$(cd $(dirname $(dirname $0)) && pwd)
+bin=$top_dir/sdk/examples/devmode_rust/bin/devmode_rust
 
-
-class InvalidState(Exception):
-    pass
-
-
-class NoChainHead(Exception):
-    pass
-
-
-class ReceiveError(Exception):
-    pass
-
-
-class UnknownBlock(Exception):
-    pass
-
-
-class UnknownPeer(Exception):
-    pass
-
-
-class BlockNotReady(Exception):
-    pass
+if [ -e $bin ]
+then
+    $bin $*
+else
+    echo "Please build devmode_rust first with 'build_all' or 'build_rust'"
+fi

@@ -32,7 +32,7 @@ pub enum Update {
     BlockCommit(BlockId),
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct BlockId(Vec<u8>);
 impl Deref for BlockId {
     type Target = Vec<u8>;
@@ -53,7 +53,7 @@ impl From<Vec<u8>> for BlockId {
 }
 
 /// All information about a block that is relevant to consensus
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct Block {
     pub block_id: BlockId,
     pub previous_id: BlockId,
@@ -62,7 +62,7 @@ pub struct Block {
     pub payload: Vec<u8>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct PeerId(Vec<u8>);
 impl Deref for PeerId {
     type Target = Vec<u8>;
@@ -168,6 +168,7 @@ pub enum Error {
     UnknownBlock(String),
     UnknownPeer(String),
     BlockNotReady,
+    NoChainHead,
 }
 
 impl ::std::error::Error for Error {
@@ -181,6 +182,7 @@ impl ::std::error::Error for Error {
             UnknownBlock(ref s) => s,
             UnknownPeer(ref s) => s,
             BlockNotReady => "Block not ready to finalize",
+            NoChainHead => "No chain head",
         }
     }
 
@@ -194,6 +196,7 @@ impl ::std::error::Error for Error {
             UnknownBlock(_) => None,
             UnknownPeer(_) => None,
             BlockNotReady => None,
+            NoChainHead => None,
         }
     }
 }
@@ -209,6 +212,7 @@ impl ::std::fmt::Display for Error {
             UnknownBlock(ref s) => write!(f, "UnknownBlock: {}", s),
             UnknownPeer(ref s) => write!(f, "UnknownPeer: {}", s),
             BlockNotReady => write!(f, "BlockNotReady"),
+            NoChainHead => write!(f, "NoChainHead"),
         }
     }
 }
