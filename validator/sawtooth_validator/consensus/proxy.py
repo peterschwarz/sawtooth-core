@@ -15,10 +15,6 @@
 
 import logging
 
-from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
-from sawtooth_validator.protobuf.consensus_pb2 import ConsensusSettingsEntry
-from sawtooth_validator.protobuf.consensus_pb2 import ConsensusStateEntry
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -106,18 +102,7 @@ class ConsensusProxy:
     # Using blockstore and state database
     def blocks_get(self, block_ids):
         '''Returns a list of consensus blocks.'''
-
-        blocks = self._get_blocks(*block_ids)
-
-        return [
-            ConsensusBlock(
-                block_id=block.identifier,
-                previous_id=block.previous_block_id,
-                signer_id=block.header_signature,
-                block_num=block.block_num,
-                payload=block.consensus)
-            for block in blocks
-        ]
+        return self._get_blocks(*block_ids)
 
     def chain_head_get(self):
         '''Returns the chain head.'''
@@ -127,12 +112,7 @@ class ConsensusProxy:
         if chain_head is None:
             raise UnknownBlock()
 
-        return ConsensusBlock(
-                block_id=chain_head.identifier,
-                previous_id=chain_head.previous_block_id,
-                signer_id=chain_head.header_signature,
-                block_num=chain_head.block_num,
-                payload=chain_head.consensus)
+        return chain_head
 
     def settings_get(self, block_id, settings):
         settings_view = \
@@ -140,9 +120,7 @@ class ConsensusProxy:
                 self._settings_view_factory)
 
         return [
-            ConsensusSettingsEntry(
-                key=setting,
-                value=settings_view.get_setting(setting))
+            (setting, settings_view.get_setting(setting))
             for setting in settings
         ]
 
@@ -154,9 +132,7 @@ class ConsensusProxy:
                 self._state_view_factory)
 
         return [
-            ConsensusStateEntry(
-                address=address,
-                data=state_view.get(address))
+            (address, state_view.get(address))
             for address in addresses
         ]
 
