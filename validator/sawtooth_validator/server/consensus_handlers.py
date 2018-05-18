@@ -55,6 +55,9 @@ def add(
     handler = handlers.ConsensusBlocksGetHandler(consensus_proxy)
     dispatcher.add_handler(handler.request_type, handler, thread_pool)
 
+    handler = handlers.ConsensusChainHeadGetHandler(consensus_proxy)
+    dispatcher.add_handler(handler.request_type, handler, thread_pool)
+
     handler = handlers.ConsensusSettingsGetHandler(consensus_proxy)
     dispatcher.add_handler(handler.request_type, handler, thread_pool)
 

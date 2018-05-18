@@ -119,6 +119,21 @@ class ConsensusProxy:
             for block in blocks
         ]
 
+    def chain_head_get(self):
+        '''Returns the chain head.'''
+
+        chain_head = self._chain_controller.chain_head
+
+        if chain_head is None:
+            raise UnknownBlock()
+
+        return ConsensusBlock(
+                block_id=chain_head.identifier,
+                previous_id=chain_head.previous_block_id,
+                signer_id=chain_head.header_signature,
+                block_num=chain_head.block_num,
+                payload=chain_head.consensus)
+
     def settings_get(self, block_id, settings):
         settings_view = \
             self._get_blocks(block_id).get_settings_view(
