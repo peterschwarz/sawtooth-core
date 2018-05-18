@@ -34,12 +34,14 @@ impl DevmodeService {
     }
 
     fn get_chain_head(&mut self) -> Block {
+        debug!("Getting chain head");
         self.service
             .get_chain_head()
             .expect("Failed to get chain head")
     }
 
     fn get_block(&mut self, block_id: BlockId) -> Block {
+        debug!("Getting block {:?}", block_id);
         self.service
             .get_blocks(vec![block_id.clone()])
             .expect("Failed to get block").get(&block_id).unwrap()
@@ -47,42 +49,49 @@ impl DevmodeService {
     }
 
     fn initialize_block(&mut self) {
+        debug!("Initializing block");
         self.service
             .initialize_block(None)
             .expect("Failed to initialize");
     }
 
     fn finalize_block(&mut self) {
+        debug!("Finalizing block");
         self.service
             .finalize_block(Vec::from(&b"Devmode"[..]))
             .expect("Failed to finalize");
     }
 
     fn check_block(&mut self, block_id: BlockId) {
+        debug!("Checking block {:?}", block_id);
         self.service
             .check_blocks(vec![block_id])
             .expect("Failed to check block");
     }
 
     fn fail_block(&mut self, block_id: BlockId) {
+        debug!("Failing block {:?}", block_id);
         self.service
             .fail_block(block_id)
             .expect("Failed to fail block");
     }
 
     fn ignore_block(&mut self, block_id: BlockId) {
+        debug!("Ignoring block {:?}", block_id);
         self.service
             .ignore_block(block_id)
             .expect("Failed to ignore block")
     }
 
     fn commit_block(&mut self, block_id: BlockId) {
+        debug!("Committing block {:?}", block_id);
         self.service
             .commit_block(block_id)
             .expect("Failed to commit block");
     }
 
     fn cancel_block(&mut self) {
+        debug!("Canceling block");
         self.service.cancel_block().expect("Failed to cancel block");
     }
 
@@ -109,7 +118,7 @@ impl DevmodeService {
                 let min_wait_time: u64 = ints[0];
                 let max_wait_time: u64 = ints[1];
 
-                if min_wait_time > max_wait_time {
+                if min_wait_time >= max_wait_time {
                     return time::Duration::new(0, 0);
                 }
 
@@ -156,48 +165,58 @@ impl Engine for DevmodeEngine {
             // While the new block is getting built, keep validating
             // incoming new blocks.
             match updates.recv_timeout(time::Duration::from_millis(10)) {
-                Ok(update) => match update {
-                    Update::BlockNew(block) => {
-                        if check_consensus(&block) {
-                            service.check_block(block.block_id);
-                        } else {
-                            service.fail_block(block.block_id);
+                Ok(update) => {
+                    debug!("Received message: {:?}", update);
+                    match update {
+                        Update::BlockNew(block) => {
+                            info!("Checking block {:?} for consensus", block);
+                            if check_consensus(&block) {
+                                info!("Block {:?} passed consensus check", block);
+                                service.check_block(block.block_id);
+                            } else {
+                                info!("Block {:?} failed consensus check", block);
+                                service.fail_block(block.block_id);
+                            }
                         }
-                    }
 
-                    Update::BlockValid(block_id) => {
-                        let block = service.get_block(block_id.clone());
+                        Update::BlockValid(block_id) => {
+                            let block = service.get_block(block_id.clone());
 
-                        // Advance the chain if possible.
-                        match block.block_num.cmp(&chain_head.block_num) {
-                            Ordering::Greater => service.commit_block(block_id),
-                            Ordering::Less => service.ignore_block(block_id),
-                            Ordering::Equal => {
-                                if block.block_id > chain_head.block_id {
-                                    service.commit_block(block_id)
-                                } else {
-                                    service.ignore_block(block_id)
+                            info!("Choosing between chain heads -- current: {:?} -- new: {:?}",
+                                  chain_head, block);
+
+                            // Advance the chain if possible.
+                            match block.block_num.cmp(&chain_head.block_num) {
+                                Ordering::Greater => service.commit_block(block_id),
+                                Ordering::Less => service.ignore_block(block_id),
+                                Ordering::Equal => {
+                                    if block.block_id > chain_head.block_id {
+                                        service.commit_block(block_id)
+                                    } else {
+                                        service.ignore_block(block_id)
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    // The chain head was updated, so abandon the
-                    // block in progress and start a new one.
-                    Update::BlockCommit(_) => {
-                        service.cancel_block();
+                        // The chain head was updated, so abandon the
+                        // block in progress and start a new one.
+                        Update::BlockCommit(_) => {
+                            info!("Chain head updated, abandoning block in progress");
 
-                        chain_head = service.get_chain_head();
-                        wait_time = service.calculate_wait_time(chain_head.block_id.clone());
-                        start = time::Instant::now();
+                            service.cancel_block();
 
-                        service.initialize_block();
-                    }
+                            chain_head = service.get_chain_head();
+                            wait_time = service.calculate_wait_time(chain_head.block_id.clone());
+                            start = time::Instant::now();
 
-                    // Devmode doesn't care about peer notifications
-                    // or invalid blocks.
-                    _ => {}
-                },
+                            service.initialize_block();
+                        }
+
+                        // Devmode doesn't care about peer notifications
+                        // or invalid blocks.
+                        _ => {}
+                    }},
 
                 Err(RecvTimeoutError::Disconnected) => {
                     println!("disconnected");
