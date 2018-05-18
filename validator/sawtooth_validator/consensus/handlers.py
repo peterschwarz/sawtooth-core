@@ -196,13 +196,13 @@ class ConsensusCancelBlockHandler(ConsensusServiceHandler):
                 consensus_pb2.ConsensusCancelBlockResponse.SERVICE_ERROR
 
 
-class ConsensusCheckBlockHandler(ConsensusServiceHandler):
+class ConsensusCheckBlocksHandler(ConsensusServiceHandler):
     def __init__(self, proxy):
         super().__init__(
-            consensus_pb2.ConsensusCheckBlockRequest,
-            validator_pb2.Message.CONSENSUS_CHECK_BLOCK_REQUEST,
-            consensus_pb2.ConsensusCheckBlockResponse,
-            validator_pb2.Message.CONSENSUS_CHECK_BLOCK_RESPONSE)
+            consensus_pb2.ConsensusCheckBlocksRequest,
+            validator_pb2.Message.CONSENSUS_CHECK_BLOCKS_REQUEST,
+            consensus_pb2.ConsensusCheckBlocksResponse,
+            validator_pb2.Message.CONSENSUS_CHECK_BLOCKS_RESPONSE)
 
         self._proxy = proxy
 

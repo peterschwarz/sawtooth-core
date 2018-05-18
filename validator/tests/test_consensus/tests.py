@@ -75,13 +75,13 @@ class TestHandlers(unittest.TestCase):
         handler.handle(None, request.SerializeToString())
         self.mock_proxy.cancel_block.assert_called_with()
 
-    def test_consensus_check_block_handler(self):
-        handler = handlers.ConsensusCheckBlockHandler(self.mock_proxy)
+    def test_consensus_check_blocks_handler(self):
+        handler = handlers.ConsensusCheckBlocksHandler(self.mock_proxy)
         request_class = handler.request_class
         request = request_class()
         request.block_ids.extend([b"test"])
         handler.handle(None, request.SerializeToString())
-        self.mock_proxy.check_block.assert_called_with(
+        self.mock_proxy.check_blocks.assert_called_with(
             request.block_ids)
 
     def test_consensus_commit_block_handler(self):
@@ -194,7 +194,7 @@ class TestProxy(unittest.TestCase):
         self._mock_block_publisher.cancel_block.assert_called_with()
 
     # Using chain controller
-    def test_check_block(self):
+    def test_check_blocks(self):
         with self.assertRaises(NotImplementedError):
             self._proxy.check_block(None)
 
