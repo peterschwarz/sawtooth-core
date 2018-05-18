@@ -262,14 +262,16 @@ class ChainController(object):
                     # If the head is to be updated to the new block.
                     if commit_new_block:
                         with self._chain_head_lock:
-                            if self._check_chain_head_updated(chain_head):
+                            if self._check_chain_head_updated(
+                                    chain_head, block):
                                 continue
 
                             self._chain_head = block
 
                             # update the the block store to have the new chain
-                            self._block_store.update_chain(result.new_chain,
-                                                           result.current_chain)
+                            self._block_store.update_chain(
+                                result.new_chain,
+                                result.current_chain)
 
                             LOGGER.info(
                                 "Chain head updated to: %s",
@@ -300,7 +302,8 @@ class ChainController(object):
                                                  self.__class__.__name__)
 
                         for blk in reversed(result.new_chain):
-                            receipts = self._make_receipts(blk.execution_results)
+                            receipts = self._make_receipts(
+                                blk.execution_results)
                             # Update all chain observers
                             for observer in self._chain_observers:
                                 observer.chain_update(blk, receipts)
@@ -317,7 +320,7 @@ class ChainController(object):
             LOGGER.exception(
                 "Unhandled exception in ChainController.on_block_validated()")
 
-    def _check_chain_head_updated(self, chain_head):
+    def _check_chain_head_updated(self, chain_head, block):
         # The validity of blocks depends partially on whether or not
         # there are any duplicate transactions or batches in the block.
         # This can only be checked accurately if the block store does
@@ -334,7 +337,7 @@ class ChainController(object):
             LOGGER.warning(
                 "Chain head updated from %s to %s while resolving"
                 " fork for block %s. Reprocessing resolution.",
-            chain_head, current_chain_head, block)
+                chain_head, current_chain_head, block)
             return True
 
         return False
