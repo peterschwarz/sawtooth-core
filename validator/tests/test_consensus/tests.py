@@ -120,6 +120,13 @@ class TestHandlers(unittest.TestCase):
         self.mock_proxy.blocks_get.assert_called_with(
             request.block_ids)
 
+    def test_consensus_chain_head_get_handler(self):
+        handler = handlers.ConsensusChainHeadGetHandler(self.mock_proxy)
+        request_class = handler.request_class
+        request = request_class()
+        handler.handle(None, request.SerializeToString())
+        self.mock_proxy.chain_head_get.assert_called_with()
+
     def test_consensus_settings_get_handler(self):
         handler = handlers.ConsensusSettingsGetHandler(self.mock_proxy)
         request_class = handler.request_class
@@ -253,6 +260,22 @@ class TestProxy(unittest.TestCase):
 
         self.assertEqual(
             block_2,
+            ConsensusBlock(
+                block_id=b'id-2',
+                previous_id=b'prev-2',
+                signer_id=b'sign-2',
+                block_num=2,
+                payload=b'consensus'))
+
+    def test_chain_head_get(self):
+        self._mock_chain_controller.chain_head = Mock(
+            identifier=b'id-2',
+            previous_block_id=b'prev-2',
+            header_signature=b'sign-2',
+            block_num=2,
+            consensus=b'consensus')
+        self.assertEqual(
+            self._proxy.chain_head_get(),
             ConsensusBlock(
                 block_id=b'id-2',
                 previous_id=b'prev-2',

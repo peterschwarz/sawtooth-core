@@ -303,6 +303,27 @@ class ConsensusBlocksGetHandler(ConsensusServiceHandler):
                 consensus_pb2.ConsensusBlocksGetResponse.SERVICE_ERROR
 
 
+class ConsensusChainHeadGetHandler(ConsensusServiceHandler):
+    def __init__(self, proxy):
+        super().__init__(
+            consensus_pb2.ConsensusChainHeadGetRequest,
+            validator_pb2.Message.CONSENSUS_CHAIN_HEAD_GET_REQUEST,
+            consensus_pb2.ConsensusChainHeadGetResponse,
+            validator_pb2.Message.CONSENSUS_CHAIN_HEAD_GET_RESPONSE)
+
+        self._proxy = proxy
+
+    def handle_request(self, request, response):
+        try:
+            response.chain_head = self._proxy.chain_head_get()
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusChainHeadGetResponse.NO_CHAIN_HEAD
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusChainHeadGetResponse.SERVICE_ERROR
+
+
 class ConsensusSettingsGetHandler(ConsensusServiceHandler):
     def __init__(self, proxy):
         super().__init__(
