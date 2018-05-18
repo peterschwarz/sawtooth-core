@@ -186,13 +186,13 @@ class BlockValidator(object):
                     chain_commit_state.check_for_transaction_dependencies(
                         transactions)
 
-                    if not self._check_chain_head_updated(chain_head):
+                    if not self._check_chain_head_updated(chain_head, blkw):
                         break
 
                 except (DuplicateBatch,
                         DuplicateTransaction,
                         MissingDependency) as err:
-                    if not self._check_chain_head_updated(chain_head):
+                    if not self._check_chain_head_updated(chain_head, blkw):
                         raise BlockValidationFailure(
                             "Block {} failed validation: {}".format(blkw, err))
 
@@ -236,7 +236,7 @@ class BlockValidator(object):
                 " but got {}".format(
                     blkw, blkw.state_root_hash, state_hash))
 
-    def _check_chain_head_updated(self, chain_head):
+    def _check_chain_head_updated(self, chain_head, block):
         # The validity of blocks depends partially on whether or not
         # there are any duplicate transactions or batches in the block.
         # This can only be checked accurately if the block store does

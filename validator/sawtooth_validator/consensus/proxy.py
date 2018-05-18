@@ -71,17 +71,37 @@ class ConsensusProxy:
         self._block_publisher.cancel_block()
 
     # Using chain controller
-    def check_block(self, block_ids):
-        raise NotImplementedError()
+    def check_blocks(self, block_ids):
+        try:
+            blocks = [
+                self._block_cache[block_id.hex()]
+                for block_id in block_ids
+            ]
+        except KeyError as key_error:
+            raise UnknownBlock(key_error.args[0])
+
+        self._chain_controller.submit_blocks_for_verification(blocks)
 
     def commit_block(self, block_id):
-        raise NotImplementedError()
+        try:
+            block = self._block_cache[block_id.hex()]
+        except KeyError as key_error:
+            raise UnknownBlock(key_error.args[0])
+        self._chain_controller.commit_block(block)
 
     def ignore_block(self, block_id):
-        raise NotImplementedError()
+        try:
+            block = self._block_cache[block_id.hex()]
+        except KeyError:
+            raise UnknownBlock()
+        self._chain_controller.ignore_block(block)
 
     def fail_block(self, block_id):
-        raise NotImplementedError()
+        try:
+            block = self._block_cache[block_id.hex()]
+        except KeyError:
+            raise UnknownBlock()
+        self._chain_controller.fail_block(block)
 
     # Using blockstore and state database
     def blocks_get(self, block_ids):

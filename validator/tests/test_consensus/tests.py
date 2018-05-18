@@ -75,13 +75,13 @@ class TestHandlers(unittest.TestCase):
         handler.handle(None, request.SerializeToString())
         self.mock_proxy.cancel_block.assert_called_with()
 
-    def test_consensus_check_block_handler(self):
-        handler = handlers.ConsensusCheckBlockHandler(self.mock_proxy)
+    def test_consensus_check_blocks_handler(self):
+        handler = handlers.ConsensusCheckBlocksHandler(self.mock_proxy)
         request_class = handler.request_class
         request = request_class()
         request.block_ids.extend([b"test"])
         handler.handle(None, request.SerializeToString())
-        self.mock_proxy.check_block.assert_called_with(
+        self.mock_proxy.check_blocks.assert_called_with(
             request.block_ids)
 
     def test_consensus_commit_block_handler(self):
@@ -194,21 +194,35 @@ class TestProxy(unittest.TestCase):
         self._mock_block_publisher.cancel_block.assert_called_with()
 
     # Using chain controller
-    def test_check_block(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.check_block(None)
+    def test_check_blocks(self):
+        block_ids = [bytes([0x56]), bytes([0x78])]
+        self._mock_block_cache["56"] = "block0"
+        self._mock_block_cache["78"] = "block1"
+        self._proxy.check_blocks(block_ids)
+        self._mock_chain_controller\
+            .submit_blocks_for_verification\
+            .assert_called_with(["block0", "block1"])
 
     def test_commit_block(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.commit_block(None)
+        self._mock_block_cache["34"] = "a block"
+        self._proxy.commit_block(block_id=bytes([0x34]))
+        self._mock_chain_controller\
+            .commit_block\
+            .assert_called_with("a block")
 
     def test_ignore_block(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.ignore_block(None)
+        self._mock_block_cache["34"] = "a block"
+        self._proxy.ignore_block(block_id=bytes([0x34]))
+        self._mock_chain_controller\
+            .ignore_block\
+            .assert_called_with("a block")
 
     def test_fail_block(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.fail_block(None)
+        self._mock_block_cache["34"] = "a block"
+        self._proxy.fail_block(block_id=bytes([0x34]))
+        self._mock_chain_controller\
+            .fail_block\
+            .assert_called_with("a block")
 
     # Using blockstore and state database
     def test_blocks_get(self):

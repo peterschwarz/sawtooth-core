@@ -31,6 +31,8 @@ from sawtooth_validator.journal.publisher_ce import BlockEmpty
 from sawtooth_validator.journal.publisher_ce import BlockInProgress
 from sawtooth_validator.journal.publisher_ce import BlockNotInitialized
 
+from sawtooth_validator.consensus.proxy import UnknownBlock
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -161,7 +163,7 @@ class ConsensusFinalizeBlockHandler(ConsensusServiceHandler):
     def handle_request(self, request, response):
         try:
             self._proxy.finalize_block(request.data)
-        except KeyError:
+        except UnknownBlock:
             response.status =\
                 consensus_pb2.ConsensusFinalizeBlockResponse.UNKNOWN_BLOCK
         except BlockNotInitialized:
@@ -196,18 +198,25 @@ class ConsensusCancelBlockHandler(ConsensusServiceHandler):
                 consensus_pb2.ConsensusCancelBlockResponse.SERVICE_ERROR
 
 
-class ConsensusCheckBlockHandler(ConsensusServiceHandler):
+class ConsensusCheckBlocksHandler(ConsensusServiceHandler):
     def __init__(self, proxy):
         super().__init__(
-            consensus_pb2.ConsensusCheckBlockRequest,
-            validator_pb2.Message.CONSENSUS_CHECK_BLOCK_REQUEST,
-            consensus_pb2.ConsensusCheckBlockResponse,
-            validator_pb2.Message.CONSENSUS_CHECK_BLOCK_RESPONSE)
+            consensus_pb2.ConsensusCheckBlocksRequest,
+            validator_pb2.Message.CONSENSUS_CHECK_BLOCKS_REQUEST,
+            consensus_pb2.ConsensusCheckBlocksResponse,
+            validator_pb2.Message.CONSENSUS_CHECK_BLOCKS_RESPONSE)
 
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.check_block(request.block_ids)
+        try:
+            self._proxy.check_blocks(request.block_ids)
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusCheckBlocksResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusCheckBlocksResponse.SERVICE_ERROR
 
 
 class ConsensusCommitBlockHandler(ConsensusServiceHandler):
@@ -221,7 +230,14 @@ class ConsensusCommitBlockHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.commit_block(request.block_id)
+        try:
+            self._proxy.commit_block(request.block_id)
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusCommitBlockResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusCommitBlockResponse.SERVICE_ERROR
 
 
 class ConsensusIgnoreBlockHandler(ConsensusServiceHandler):
@@ -235,7 +251,14 @@ class ConsensusIgnoreBlockHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.ignore_block(request.block_id)
+        try:
+            self._proxy.ignore_block(request.block_id)
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusIgnoreBlockResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusIgnoreBlockResponse.SERVICE_ERROR
 
 
 class ConsensusFailBlockHandler(ConsensusServiceHandler):
@@ -249,7 +272,14 @@ class ConsensusFailBlockHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.fail_block(request.block_id)
+        try:
+            self._proxy.fail_block(request.block_id)
+        except UnknownBlock:
+            response.status =\
+                consensus_pb2.ConsensusFailBlockResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusFailBlockResponse.SERVICE_ERROR
 
 
 class ConsensusBlocksGetHandler(ConsensusServiceHandler):

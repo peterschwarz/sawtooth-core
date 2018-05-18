@@ -40,7 +40,7 @@ def add(
     handler = handlers.ConsensusCancelBlockHandler(consensus_proxy)
     dispatcher.add_handler(handler.request_type, handler, thread_pool)
 
-    handler = handlers.ConsensusCheckBlockHandler(consensus_proxy)
+    handler = handlers.ConsensusCheckBlocksHandler(consensus_proxy)
     dispatcher.add_handler(handler.request_type, handler, thread_pool)
 
     handler = handlers.ConsensusCommitBlockHandler(consensus_proxy)

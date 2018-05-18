@@ -21,11 +21,8 @@ from threading import RLock
 
 from sawtooth_validator.concurrent.thread import InstrumentedThread
 from sawtooth_validator.journal.block_wrapper import BlockStatus
-from sawtooth_validator.journal.block_wrapper import BlockWrapper
 from sawtooth_validator.journal.block_wrapper import NULL_BLOCK_IDENTIFIER
 from sawtooth_validator.journal.block_validator import BlockValidationFailure
-from sawtooth_validator.journal.consensus.consensus_factory import \
-    ConsensusFactory
 from sawtooth_validator.protobuf.transaction_receipt_pb2 import \
     TransactionReceipt
 from sawtooth_validator import metrics
@@ -35,13 +32,13 @@ LOGGER = logging.getLogger(__name__)
 COLLECTOR = metrics.get_collector(__name__)
 
 
-class ForkResolutionError(Exception):
+class BuildForkError(Exception):
     """
     Indication that an error occured during fork resolution.
     """
 
 
-class ForkResolutionResult:
+class BuildForkResult:
     def __init__(self, block):
         self.block = block
         self.chain_head = None
@@ -108,6 +105,30 @@ class _ChainThread(InstrumentedThread):
         self._exit = True
 
 
+class _CommitThread(InstrumentedThread):
+    def __init__(self, commit_queue, commit_fn):
+        super().__init__(name='_CommitThread')
+        self._commit_queue = commit_queue
+        self._commit_fn = commit_fn
+        self._exit = False
+
+    def run(self):
+        while True:
+            try:
+                block = self._commit_queue.get(timeout=1)
+                LOGGER.warning("Got %s", block)
+                self._commit_fn(block)
+            except queue.Empty:
+                # If getting a block times out, just try again.
+                pass
+
+            if self._exit:
+                return
+
+    def stop(self):
+        self._exit = True
+
+
 class ChainController(object):
     """
     To evaluating new blocks to determine if they should extend or replace
@@ -120,6 +141,7 @@ class ChainController(object):
                  state_view_factory,
                  chain_head_lock,
                  on_chain_updated,
+                 consensus_notifier,
                  chain_id_manager,
                  identity_signer,
                  data_dir,
@@ -156,6 +178,7 @@ class ChainController(object):
         """
         self._lock = RLock()
         self._chain_head_lock = chain_head_lock
+        self._consensus_notifier = consensus_notifier
         self._block_cache = block_cache
         self._block_store = block_cache.block_store
         self._state_view_factory = state_view_factory
@@ -188,6 +211,9 @@ class ChainController(object):
 
         self._block_validator = block_validator
 
+        self._commit_queue = queue.Queue()
+        self._commit_thread = None
+
         # Only run this after all member variables have been bound
         self._set_chain_head_from_block_store()
 
@@ -214,11 +240,18 @@ class ChainController(object):
             block_queue=self._block_queue,
             block_cache=self._block_cache)
         self._chain_thread.start()
+        self._commit_thread = _CommitThread(
+            commit_queue=self._commit_queue,
+            commit_fn=self._commit_block)
+        self._commit_thread.start()
 
     def stop(self):
         if self._chain_thread is not None:
             self._chain_thread.stop()
             self._chain_thread = None
+        if self._commit_thread is not None:
+            self._commit_thread.stop()
+            self._commit_thread = None
 
     def queue_block(self, block):
         """
@@ -231,7 +264,7 @@ class ChainController(object):
     def chain_head(self):
         return self._chain_head
 
-    def _submit_blocks_for_verification(self, blocks):
+    def submit_blocks_for_verification(self, blocks):
         self._block_validator.submit_blocks_for_verification(
             blocks, self.on_block_validated)
 
@@ -245,80 +278,89 @@ class ChainController(object):
         Returns:
             None
         """
+        LOGGER.warning("on_block_validated")
+        self._blocks_considered_count.inc()
         try:
-            if block.status != BlockStatus.Valid:
-                return
-
-            with self._lock:
-                self._blocks_considered_count.inc()
-
-                while True:
-                    # Get the current chain_head
-                    chain_head = self._block_cache.block_store.chain_head
-
-                    commit_new_block, result = self._resolve_fork(
-                        block, chain_head)
-
-                    # If the head is to be updated to the new block.
-                    if commit_new_block:
-                        with self._chain_head_lock:
-                            if self._check_chain_head_updated(
-                                    chain_head, block):
-                                continue
-
-                            self._chain_head = block
-
-                            # update the the block store to have the new chain
-                            self._block_store.update_chain(
-                                result.new_chain,
-                                result.current_chain)
-
-                            LOGGER.info(
-                                "Chain head updated to: %s",
-                                self._chain_head)
-
-                            self._chain_head_gauge.set_value(
-                                self._chain_head.identifier[:8])
-
-                            self._committed_transactions_gauge.set_value(
-                                self._block_store.get_transaction_count())
-
-                            self._committed_transactions_count.inc(
-                                result.transaction_count)
-
-                            self._block_num_gauge.set_value(
-                                self._chain_head.block_num)
-
-                            # tell the BlockPublisher else the chain is updated
-                            self._notify_on_chain_updated(
-                                self._chain_head,
-                                result.committed_batches,
-                                result.uncommitted_batches)
-
-                            for batch in block.batches:
-                                if batch.trace:
-                                    LOGGER.debug("TRACE %s: %s",
-                                                 batch.header_signature,
-                                                 self.__class__.__name__)
-
-                        for blk in reversed(result.new_chain):
-                            receipts = self._make_receipts(
-                                blk.execution_results)
-                            # Update all chain observers
-                            for observer in self._chain_observers:
-                                observer.chain_update(blk, receipts)
-
-                    # The block is otherwise valid, but we have determined we
-                    # don't want it as the chain head.
-                    else:
-                        LOGGER.info('Rejected new chain head: %s', block)
-
-                    break
+            if block.status == BlockStatus.Valid:
+                self._consensus_notifier.notify_block_valid(
+                    block.header_signature)
+            else:
+                self._consensus_notifier.notify_block_invalid(
+                    block.header_signature)
 
         # pylint: disable=broad-except
         except Exception:
             LOGGER.exception(
                 "Unhandled exception in ChainController.on_block_validated()")
+
+    def ignore_block(self, block):
+        LOGGER.info("Ignoring block %s", block)
+
+    def fail_block(self, block):
+        with self._lock:
+            LOGGER.info("Failing block %s", block)
+            block.status = BlockStatus.Invalid
+
+    def commit_block(self, block):
+        self._commit_queue.put(block)
+
+    def _commit_block(self, block):
+        with self._lock:
+            try_again = True
+            while try_again:
+                # Get the current chain_head
+                chain_head = self._block_cache.block_store.chain_head
+
+                result = self._build_fork(block, chain_head)
+
+                with self._chain_head_lock:
+                    if self._check_chain_head_updated(chain_head, block):
+                        continue
+
+                    try_again = False
+
+                    self._chain_head = block
+
+                    # update the the block store to have the new chain
+                    self._block_store.update_chain(result.new_chain,
+                                                   result.current_chain)
+
+                    LOGGER.info(
+                        "Chain head updated to: %s",
+                        self._chain_head)
+
+                    self._chain_head_gauge.set_value(
+                        self._chain_head.identifier[:8])
+
+                    self._committed_transactions_gauge.set_value(
+                        self._block_store.get_transaction_count())
+
+                    self._committed_transactions_count.inc(
+                        result.transaction_count)
+
+                    self._block_num_gauge.set_value(
+                        self._chain_head.block_num)
+
+                    # tell the BlockPublisher else the chain is updated
+                    self._notify_on_chain_updated(
+                        self._chain_head,
+                        result.committed_batches,
+                        result.uncommitted_batches)
+
+                    for batch in block.batches:
+                        if batch.trace:
+                            LOGGER.debug("TRACE %s: %s",
+                                         batch.header_signature,
+                                         self.__class__.__name__)
+
+            for blk in reversed(result.new_chain):
+                receipts = self._make_receipts(blk.execution_results)
+                # Update all chain observers
+                for observer in self._chain_observers:
+                    observer.chain_update(blk, receipts)
+
+            self._consensus_notifier.notify_block_commit(
+                block.header_signature)
 
     def _check_chain_head_updated(self, chain_head, block):
         # The validity of blocks depends partially on whether or not
@@ -342,8 +384,8 @@ class ChainController(object):
 
         return False
 
-    def _resolve_fork(self, block, chain_head):
-        result = ForkResolutionResult(block)
+    def _build_fork(self, block, chain_head):
+        result = BuildForkResult(block)
         LOGGER.info("Starting fork resolution of : %s", block)
 
         # Create new local variables for current and new block, since
@@ -369,7 +411,7 @@ class ChainController(object):
                 new_block, current_block,
                 result.new_chain, result.current_chain)
 
-        except ForkResolutionError as err:
+        except BuildForkError as err:
             LOGGER.error(
                 'Encountered an error while resolving a fork with head %s:'
                 ' %s', block, err)
@@ -378,7 +420,6 @@ class ChainController(object):
         for blk in reversed(result.new_chain):
             result.transaction_count += blk.num_transactions
 
-        # Ask consensus if the new chain should be committed
         LOGGER.info(
             "Comparing current chain head '%s' against new block '%s'",
             chain_head, new_block)
@@ -396,25 +437,18 @@ class ChainController(object):
                 "Fork comparison at height %s is between %s and %s",
                 num, cur, new)
 
-        commit_new_chain = self._compare_forks_consensus(chain_head, block)
+        commit, uncommit =\
+            self._get_batch_commit_changes(
+                result.new_chain, result.current_chain)
+        result.committed_batches = commit
+        result.uncommitted_batches = uncommit
 
-        # If committing the new chain, get the list of committed batches
-        # from the current chain that need to be uncommitted and the list
-        # of uncommitted batches from the new chain that need to be
-        # committed.
-        if commit_new_chain:
-            commit, uncommit =\
-                self._get_batch_commit_changes(
-                    result.new_chain, result.current_chain)
-            result.committed_batches = commit
-            result.uncommitted_batches = uncommit
+        if result.new_chain[0].previous_block_id \
+                != chain_head.identifier:
+            self._moved_to_fork_count.inc()
 
-            if result.new_chain[0].previous_block_id \
-                    != chain_head.identifier:
-                self._moved_to_fork_count.inc()
-
-        LOGGER.info("Finished fork resolution of: %s", block)
-        return commit_new_chain, result
+        LOGGER.info("Finished buildig fork result for: %s", block)
+        return result
 
     @staticmethod
     def _compare_chain_height(head_a, head_b):
@@ -452,7 +486,7 @@ class ChainController(object):
             try:
                 blk = self._block_cache[blk.previous_block_id]
             except KeyError:
-                raise ForkResolutionError(
+                raise BuildForkError(
                     'Failed to build fork diff: block {} missing predecessor'
                     .format(blk))
 
@@ -470,7 +504,7 @@ class ChainController(object):
                 # We are at a genesis block and the blocks are not the same
                 for b in new_chain:
                     b.status = BlockStatus.Invalid
-                raise ForkResolutionError(
+                raise BuildForkError(
                     'Block {} rejected due to wrong genesis {}'.format(
                         cur_blkw, new_blkw))
 
@@ -478,36 +512,12 @@ class ChainController(object):
             try:
                 new_blkw = self._block_cache[new_blkw.previous_block_id]
             except KeyError:
-                raise ForkResolutionError(
+                raise BuildForkError(
                     'Block {} rejected due to missing predecessor {}'.format(
                         new_blkw, new_blkw.previous_block_id))
 
             cur_chain.append(cur_blkw)
             cur_blkw = self._block_cache[cur_blkw.previous_block_id]
-
-    def _compare_forks_consensus(self, chain_head, new_block):
-        """Ask the consensus module which fork to choose.
-        """
-        public_key = self._identity_signer.get_public_key().as_hex()
-        consensus = self._load_consensus(chain_head)
-        fork_resolver = consensus.ForkResolver(
-            block_cache=self._block_cache,
-            state_view_factory=self._state_view_factory,
-            data_dir=self._data_dir,
-            config_dir=self._config_dir,
-            validator_id=public_key)
-
-        return fork_resolver.compare_forks(chain_head, new_block)
-
-    def _load_consensus(self, block):
-        """Load the consensus module using the state as of the given block."""
-        if block is not None:
-            return ConsensusFactory.get_configured_consensus_module(
-                block.header_signature,
-                BlockWrapper.state_view_for_block(
-                    block,
-                    self._state_view_factory))
-        return ConsensusFactory.get_consensus_module('genesis')
 
     @staticmethod
     def _get_batch_commit_changes(new_chain, cur_chain):
@@ -540,8 +550,7 @@ class ChainController(object):
 
                 self._block_cache[block.identifier] = block
 
-                # schedule this block for validation.
-                self._submit_blocks_for_verification([block])
+                self._consensus_notifier.notify_block_new(block)
 
         # pylint: disable=broad-except
         except Exception:

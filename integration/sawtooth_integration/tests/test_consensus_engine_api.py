@@ -14,7 +14,6 @@
 # ------------------------------------------------------------------------------
 
 import json
-import logging
 import time
 import unittest
 import urllib
@@ -42,15 +41,18 @@ class TestConsensusEngineAPI(unittest.TestCase):
     def tearDown(self):
         self.stream.close()
 
-    def test_publishing(self):
-        logging.warning("Starting test")
+    def test_consensus_engine_api(self):
         batches = make_batches(BATCH_KEYS)
         committed = 0
 
         for batch in batches:
-            self.publish_block(batch)
+            batch_response = self.publish_block(batch)
+
+            self.commit_block()
+
+            # Wait for the validator to respond that the batch was committed
+            wait_for_batch(batch_response)
             committed += 1
-            logging.warning("Committed")
 
         self.assertEqual(committed, len(batches))
         blocks = query_rest_api('/blocks')
@@ -60,17 +62,15 @@ class TestConsensusEngineAPI(unittest.TestCase):
 
     def publish_block(self, batch):
         # Initialize a new block
-        logging.warning("Initializing")
-        status = self.initialize()
+        status = self._initialize()
 
         # Submit a batch and wait
         response = post_batch(batch)
         time.sleep(INTERBLOCK_PERIOD)
 
         # Finalize the block
-        logging.warning("Finalizing")
         while True:
-            status = self.finalize()
+            status = self._finalize()
             if status == consensus_pb2.\
                     ConsensusFinalizeBlockResponse.BLOCK_NOT_READY:
                 time.sleep(1)
@@ -80,10 +80,61 @@ class TestConsensusEngineAPI(unittest.TestCase):
                     consensus_pb2.ConsensusFinalizeBlockResponse.OK)
                 break
 
-        # Wait for the validator to respond that the batch was committed
-        wait_for_batch(response)
+        return response
 
-    def initialize(self):
+    def commit_block(self):
+        block_id = self._receive_new()
+        self._check_and_commit(block_id)
+
+    def _receive_new(self):
+        new_update = self._receive_update(
+            validator_pb2.Message.CONSENSUS_NOTIFY_BLOCK_NEW,
+            consensus_pb2.ConsensusNotifyBlockNew)
+        return new_update.block.block_id
+
+    def _check_and_commit(self, block_id):
+        self._check(block_id)
+        valid_update = self._receive_update(
+            validator_pb2.Message.CONSENSUS_NOTIFY_BLOCK_VALID,
+            consensus_pb2.ConsensusNotifyBlockValid)
+        self.assertEqual(
+            block_id,
+            valid_update.block_id)
+        self._commit(block_id)
+        commit_update = self._receive_update(
+            validator_pb2.Message.CONSENSUS_NOTIFY_BLOCK_COMMIT,
+            consensus_pb2.ConsensusNotifyBlockCommit)
+        self.assertEqual(
+            block_id,
+            commit_update.block_id)
+
+    def _check(self, block_id):
+        future = self.stream.send(
+            validator_pb2.Message.CONSENSUS_CHECK_BLOCKS_REQUEST,
+            consensus_pb2.ConsensusCheckBlocksRequest(block_ids=[block_id])
+                         .SerializeToString())
+        result = future.result()
+        self.assertEqual(
+            result.message_type,
+            validator_pb2.Message.CONSENSUS_CHECK_BLOCKS_RESPONSE)
+        response = consensus_pb2.ConsensusCheckBlocksResponse()
+        response.ParseFromString(result.content)
+        return response.status
+
+    def _commit(self, block_id):
+        future = self.stream.send(
+            validator_pb2.Message.CONSENSUS_COMMIT_BLOCK_REQUEST,
+            consensus_pb2.ConsensusCommitBlockRequest(block_id=block_id)
+                         .SerializeToString())
+        result = future.result()
+        self.assertEqual(
+            result.message_type,
+            validator_pb2.Message.CONSENSUS_COMMIT_BLOCK_RESPONSE)
+        response = consensus_pb2.ConsensusCommitBlockResponse()
+        response.ParseFromString(result.content)
+        return response.status
+
+    def _initialize(self):
         future = self.stream.send(
             validator_pb2.Message.CONSENSUS_INITIALIZE_BLOCK_REQUEST,
             consensus_pb2.ConsensusInitializeBlockRequest()
@@ -96,7 +147,7 @@ class TestConsensusEngineAPI(unittest.TestCase):
         response.ParseFromString(result.content)
         return response.status
 
-    def finalize(self):
+    def _finalize(self):
         future = self.stream.send(
             validator_pb2.Message.CONSENSUS_FINALIZE_BLOCK_REQUEST,
             consensus_pb2.ConsensusFinalizeBlockRequest(data=b"Devmode")
@@ -108,6 +159,17 @@ class TestConsensusEngineAPI(unittest.TestCase):
         response = consensus_pb2.ConsensusFinalizeBlockResponse()
         response.ParseFromString(result.content)
         return response.status
+
+    def _receive_update(self, update_type, update_class):
+        message = self.stream.receive().result()
+        self.stream.send_back(
+            validator_pb2.Message.CONSENSUS_NOTIFY_ACK,
+            message.correlation_id,
+            consensus_pb2.ConsensusNotifyAck().SerializeToString())
+        self.assertEqual(message.message_type, update_type)
+        update = update_class()
+        update.ParseFromString(message.content)
+        return update
 
 
 def post_batch(batch):
