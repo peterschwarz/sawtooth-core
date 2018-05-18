@@ -16,6 +16,7 @@
 import logging
 
 from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusSettingsEntry
 from sawtooth_validator.protobuf.consensus_pb2 import ConsensusStateEntry
 
 LOGGER = logging.getLogger(__name__)
@@ -30,10 +31,11 @@ class ConsensusProxy:
     to the appropriate components."""
 
     def __init__(self, block_cache, chain_controller, block_publisher,
-                 state_view_factory):
+                 settings_view_factory, state_view_factory):
         self._block_cache = block_cache
         self._chain_controller = chain_controller
         self._block_publisher = block_publisher
+        self._settings_view_factory = settings_view_factory
         self._state_view_factory = state_view_factory
 
     # Using network service
@@ -98,13 +100,23 @@ class ConsensusProxy:
         ]
 
     def settings_get(self, block_id, settings):
-        raise NotImplementedError()
+        settings_view = \
+            self._get_blocks(block_id).get_settings_view(
+                self._settings_view_factory)
+
+        return [
+            ConsensusSettingsEntry(
+                key=setting,
+                value=settings_view.get_setting(setting))
+            for setting in settings
+        ]
 
     def state_get(self, block_id, addresses):
         '''Returns a list of consensus state entries.'''
 
         state_view = \
-            self._get_blocks(block_id).get_state_view(self._state_view_factory)
+            self._get_blocks(block_id).get_state_view(
+                self._state_view_factory)
 
         return [
             ConsensusStateEntry(

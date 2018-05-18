@@ -401,6 +401,7 @@ class Validator(object):
                 block_cache=block_cache,
                 chain_controller=chain_controller,
                 block_publisher=block_publisher,
+                settings_view_factory=SettingsViewFactory(state_view_factory),
                 state_view_factory=state_view_factory)
 
             consensus_handlers.add(

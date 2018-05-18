@@ -7,6 +7,7 @@ from sawtooth_validator.consensus.proxy import ConsensusProxy
 from sawtooth_validator.journal.publisher import FinalizeBlockResult
 
 from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusSettingsEntry
 from sawtooth_validator.protobuf.consensus_pb2 import ConsensusStateEntry
 
 
@@ -146,11 +147,13 @@ class TestProxy(unittest.TestCase):
         self._mock_block_cache = {}
         self._mock_block_publisher = Mock()
         self._mock_chain_controller = Mock()
+        self._mock_settings_view_factory = Mock()
         self._mock_state_view_factory = Mock()
         self._proxy = ConsensusProxy(
             block_cache=self._mock_block_cache,
             chain_controller=self._mock_chain_controller,
             block_publisher=self._mock_block_publisher,
+            settings_view_factory=self._mock_settings_view_factory,
             state_view_factory=self._mock_state_view_factory)
 
     def test_send_to(self):
@@ -244,8 +247,18 @@ class TestProxy(unittest.TestCase):
                 payload=b'consensus'))
 
     def test_settings_get(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.settings_get(None, None)
+        self._mock_block_cache[b'block'.hex()] = MockBlock()
+
+        self.assertEqual(
+            self._proxy.settings_get(b'block', ['key1', 'key2']),
+            [
+                ConsensusSettingsEntry(
+                    key='key1',
+                    value='mock-key1'),
+                ConsensusSettingsEntry(
+                    key='key2',
+                    value='mock-key2')
+            ])
 
     def test_state_get(self):
         self._mock_block_cache[b'block'.hex()] = MockBlock()
@@ -266,7 +279,15 @@ class MockBlock:
     def get_state_view(self, state_view_factory):
         return MockStateView()
 
+    def get_settings_view(self, settings_view_factory):
+        return MockSettingsView()
+
 
 class MockStateView:
     def get(self, address):
         return 'mock-{}'.format(address).encode()
+
+
+class MockSettingsView:
+    def get_setting(self, key):
+        return 'mock-{}'.format(key)
