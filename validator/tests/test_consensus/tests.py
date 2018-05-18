@@ -6,6 +6,8 @@ from sawtooth_validator.consensus.proxy import ConsensusProxy
 
 from sawtooth_validator.journal.publisher import FinalizeBlockResult
 
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
+
 
 class TestHandlers(unittest.TestCase):
 
@@ -204,8 +206,39 @@ class TestProxy(unittest.TestCase):
 
     # Using blockstore and state database
     def test_blocks_get(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.blocks_get(None)
+        self._mock_block_cache[b'block1'.hex()] = Mock(
+            identifier=b'id-1',
+            previous_block_id=b'prev-1',
+            header_signature=b'sign-1',
+            block_num=1,
+            consensus=b'consensus')
+
+        self._mock_block_cache[b'block2'.hex()] = Mock(
+            identifier=b'id-2',
+            previous_block_id=b'prev-2',
+            header_signature=b'sign-2',
+            block_num=2,
+            consensus=b'consensus')
+
+        block_1, block_2 = self._proxy.blocks_get([b'block1', b'block2'])
+
+        self.assertEqual(
+            block_1,
+            ConsensusBlock(
+                block_id=b'id-1',
+                previous_id=b'prev-1',
+                signer_id=b'sign-1',
+                block_num=1,
+                payload=b'consensus'))
+
+        self.assertEqual(
+            block_2,
+            ConsensusBlock(
+                block_id=b'id-2',
+                previous_id=b'prev-2',
+                signer_id=b'sign-2',
+                block_num=2,
+                payload=b'consensus'))
 
     def test_settings_get(self):
         with self.assertRaises(NotImplementedError):

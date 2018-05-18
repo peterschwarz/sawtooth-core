@@ -18,6 +18,8 @@ import logging
 
 from google.protobuf.message import DecodeError
 
+from sawtooth_validator.consensus.proxy import UnknownBlock
+
 from sawtooth_validator.protobuf import consensus_pb2
 from sawtooth_validator.protobuf import validator_pb2
 
@@ -261,7 +263,14 @@ class ConsensusBlocksGetHandler(ConsensusServiceHandler):
         self._proxy = proxy
 
     def handle_request(self, request, response):
-        self._proxy.blocks_get(request.block_ids)
+        try:
+            response.blocks = self._proxy.blocks_get(request.block_ids)
+        except KeyError:
+            response.status =\
+                consensus_pb2.ConsensusBlocksGetResponse.UNKNOWN_BLOCK
+        except Exception:  # pylint: disable=broad-except
+            response.status =\
+                consensus_pb2.ConsensusBlocksGetResponse.SERVICE_ERROR
 
 
 class ConsensusSettingsGetHandler(ConsensusServiceHandler):

@@ -15,6 +15,8 @@
 
 import logging
 
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -78,10 +80,34 @@ class ConsensusProxy:
 
     # Using blockstore and state database
     def blocks_get(self, block_ids):
-        raise NotImplementedError()
+        '''Returns a list of consensus blocks.'''
+
+        blocks = self._get_blocks(*block_ids)
+
+        return [
+            ConsensusBlock(
+                block_id=block.identifier,
+                previous_id=block.previous_block_id,
+                signer_id=block.header_signature,
+                block_num=block.block_num,
+                payload=block.consensus)
+            for block in blocks
+        ]
 
     def settings_get(self, block_id, settings):
         raise NotImplementedError()
 
     def state_get(self, block_id, addresses):
         raise NotImplementedError()
+
+    def _get_blocks(self, *block_ids):
+        try:
+            if len(block_ids) == 1:
+                return self._block_cache[block_ids[0]]
+
+            return [
+                self._block_cache[block_id.hex()]
+                for block_id in block_ids
+            ]
+        except KeyError:
+            raise UnknownBlock()
