@@ -106,7 +106,7 @@ class _PublisherThread(InstrumentedThread):
                 self._check_publish_block_frequency
             while True:
                 try:
-                    batch = self._batch_queue.get(
+                    self._batch_queue.get(
                         timeout=self._check_publish_block_frequency,
                         and_then=self._block_publisher.on_batch_received)
                 except queue.Empty:
