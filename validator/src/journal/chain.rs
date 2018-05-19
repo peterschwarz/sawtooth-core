@@ -60,7 +60,7 @@ impl From<ValidationError> for ChainControllerError {
 }
 
 pub trait ChainObserver {
-    fn chain_update(&mut self, block: &Block, receipts: &[TransactionReceipt]);
+    fn chain_update(&mut self, block: &Block, receipts: &[&TransactionReceipt]);
 }
 
 pub trait BlockCache {
@@ -69,21 +69,6 @@ pub trait BlockCache {
     fn put(&mut self, block: Block);
 
     fn get(&self, block_id: &str) -> Option<Block>;
-}
-
-struct PyBlockCache {
-    py_block_cache: PyObject,
-}
-
-impl BlockCache for PyBlockCache {
-    fn contains(&self, block_id: &str) -> bool {
-        false
-    }
-    fn put(&mut self, block: Block) {}
-
-    fn get(&self, block_id: &str) -> Option<Block> {
-        None
-    }
 }
 
 #[derive(Debug)]
@@ -97,15 +82,37 @@ pub trait BlockValidator {
     fn validate_block(&self, block: Block) -> Result<(), ValidationError>;
 }
 
+// This should be in a validation module
+pub struct BlockValidationResult {
+    pub chain_head: Block,
+    pub block: Block,
+
+    pub execution_results: Vec<ExecutionResults>,
+
+    pub new_chain: Vec<Block>,
+    pub current_chain: Vec<Block>,
+
+    pub committed_batches: Vec<Batch>,
+    pub uncommitted_batches: Vec<Batch>
+}
+
+// This should be in a validation Module
+pub struct ExecutionResults {
+}
+
 pub trait ChainWriter {
-    fn update_chain(&mut self, blocks: &[Block]) -> Result<(), ChainControllerError>;
+    fn update_chain(
+        &mut self,
+        new_chain: &[Block],
+        old_chain: &[Block],
+    ) -> Result<(), ChainControllerError>;
 }
 
 pub struct ChainController<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> {
     block_cache: BC,
     block_validator: BV,
     chain_writer: CW,
-    chain_head: Option<String>,
+    chain_head: Option<Block>,
     chain_id_manager: ChainIdManager,
     observers: Vec<Box<ChainObserver>>,
     lock: RwLock<usize>,
@@ -131,7 +138,9 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
     }
 
     fn on_block_received(&mut self, block: Block) -> Result<(), ChainControllerError> {
-        self.lock.write().unwrap();
+        self.lock
+            .write()
+            .expect("No lock holder should have poisoned the lock");
 
         if self.has_block_no_lock(&block.header_signature) {
             return Ok(());
@@ -167,7 +176,11 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
     fn set_genesis(&mut self, block: Block) -> Result<(), ChainControllerError> {
         if block.previous_block_id == journal::NULL_BLOCK_IDENTIFIER {
             let chain_id = self.chain_id_manager.get_block_chain_id()?;
-            if chain_id.as_ref().map(|block_id| block_id != &block.header_signature).unwrap_or(false) {
+            if chain_id
+                .as_ref()
+                .map(|block_id| block_id != &block.header_signature)
+                .unwrap_or(false)
+            {
                 warn!(
                     "Block id does not match block chain id {}. Ignoring initial chain head: {}",
                     chain_id.unwrap(),
@@ -181,16 +194,82 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
                         .save_block_chain_id(&block.header_signature)?;
                 }
 
-                self.chain_writer.update_chain(&[block.clone()])?;
-                self.chain_head = Some(block.header_signature.clone());
-                self.notify_on_chain_updated(block.clone());
+                self.chain_writer.update_chain(&[block.clone()], &[])?;
+                self.chain_head = Some(block.clone());
+                self.notify_on_chain_updated(block.clone(), vec![], vec![]);
             }
         }
 
         Ok(())
     }
 
-    fn notify_on_chain_updated(&self, block: Block) {
+    fn on_block_validated(&mut self, commit_new_block: bool, result: BlockValidationResult) {
+        self.lock
+            .write()
+            .expect("No lock holder should have poisoned the lock");
+
+        let new_block = result.block;
+        if self.chain_head
+            .as_ref()
+            .map(|block| block.header_signature != new_block.header_signature)
+            .unwrap_or(false)
+        {
+            info!(
+                "Chain head updated from {} to {} while processing block {}",
+                result.chain_head,
+                self.chain_head.as_ref().unwrap(),
+                new_block
+            );
+            debug!("Verify block again: {}", new_block);
+            self.submit_blocks_for_verification(&[new_block]);
+        } else if commit_new_block {
+            self.chain_head = Some(new_block);
+
+            self.chain_writer
+                .update_chain(&result.new_chain, &result.current_chain);
+
+            info!(
+                "Chain head updated to {}",
+                self.chain_head.as_ref().unwrap()
+            );
+
+            self.notify_on_chain_updated(
+                self.chain_head.clone().unwrap(),
+                result.committed_batches,
+                result.uncommitted_batches,
+            );
+
+            self.chain_head.as_ref().map(|block| {
+                block.batches.iter().for_each(|batch| {
+                    if batch.trace {
+                        debug!(
+                            "TRACE: {}: ChainController.on_block_validated",
+                            batch.header_signature
+                        )
+                    }
+                })
+            });
+
+            let mut new_chain = result.new_chain;
+            new_chain.reverse();
+
+            for block in new_chain {
+                let receipts: Vec<TransactionReceipt> = make_receipts(&result.execution_results);
+                for observer in self.observers.iter_mut() {
+                    observer.chain_update(&block, &receipts.iter().collect::<Vec<_>>());
+                }
+            }
+        } else {
+            info!("Rejected new chain head: {}", new_block);
+        }
+    }
+
+    fn notify_on_chain_updated(
+        &self,
+        block: Block,
+        committed_batches: Vec<Batch>,
+        uncommitted_batches: Vec<Batch>,
+    ) {
         unimplemented!()
     }
 
@@ -200,6 +279,10 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
     ) -> Result<(), ChainControllerError> {
         unimplemented!()
     }
+}
+
+fn make_receipts(result: &[ExecutionResults]) -> Vec<TransactionReceipt> {
+    unimplemented!()
 }
 
 struct ChainThread {

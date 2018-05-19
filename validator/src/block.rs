@@ -16,6 +16,7 @@
  */
 
 use batch::Batch;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Block {
@@ -29,4 +30,14 @@ pub struct Block {
     pub block_num: u64,
 
     pub header_bytes: Vec<u8>,
+}
+
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Block(id: {}, block_num: {}, state_root_hash: {}, previous_block_id: {})",
+            self.header_signature, self.block_num, self.state_root_hash, self.previous_block_id
+        )
+    }
 }
