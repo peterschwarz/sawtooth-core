@@ -17,6 +17,7 @@
 
 use std::cmp::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::thread::sleep;
 use std::time;
 
 use rand;
@@ -31,6 +32,18 @@ pub struct DevmodeService {
 impl DevmodeService {
     pub fn new(service: Box<Service>) -> Self {
         DevmodeService { service }
+    }
+
+    fn wait_for_chain_head(&mut self) -> Block {
+        let mut query_result = self.service.get_chain_head();
+
+        while let Err(Error::NoChainHead) = query_result {
+            warn!("Waiting for chain head");
+            sleep(time::Duration::from_millis(200));
+            query_result = self.service.get_chain_head();
+        }
+
+        query_result.expect("Failed to get chain head")
     }
 
     fn get_chain_head(&mut self) -> Block {
@@ -145,7 +158,7 @@ impl Engine for DevmodeEngine {
     fn start(&self, updates: Receiver<Update>, mut service: Box<Service>) {
         let mut service = DevmodeService::new(service);
 
-        let mut chain_head = service.get_chain_head();
+        let mut chain_head = service.wait_for_chain_head();
         let mut wait_time = service.calculate_wait_time(chain_head.block_id.clone());
         let mut start = time::Instant::now();
 
