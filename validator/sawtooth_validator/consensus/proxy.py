@@ -101,8 +101,8 @@ class ConsensusProxy:
 
     # Using blockstore and state database
     def blocks_get(self, block_ids):
-        '''Returns a list of consensus blocks.'''
-        return self._get_blocks(*block_ids)
+        '''Returns a list of blocks.'''
+        return self._get_blocks(block_ids)
 
     def chain_head_get(self):
         '''Returns the chain head.'''
@@ -115,8 +115,9 @@ class ConsensusProxy:
         return chain_head
 
     def settings_get(self, block_id, settings):
+        '''Returns a list of key/value pairs (str, str).'''
         settings_view = \
-            self._get_blocks(block_id).get_settings_view(
+            self._get_blocks([block_id])[0].get_settings_view(
                 self._settings_view_factory)
 
         return [
@@ -125,10 +126,10 @@ class ConsensusProxy:
         ]
 
     def state_get(self, block_id, addresses):
-        '''Returns a list of consensus state entries.'''
+        '''Returns a list of address/data pairs (str, bytes)'''
 
         state_view = \
-            self._get_blocks(block_id).get_state_view(
+            self._get_blocks([block_id])[0].get_state_view(
                 self._state_view_factory)
 
         return [
@@ -136,11 +137,8 @@ class ConsensusProxy:
             for address in addresses
         ]
 
-    def _get_blocks(self, *block_ids):
+    def _get_blocks(self, block_ids):
         try:
-            if len(block_ids) == 1:
-                return self._block_cache[block_ids[0].hex()]
-
             return [
                 self._block_cache[block_id.hex()]
                 for block_id in block_ids
