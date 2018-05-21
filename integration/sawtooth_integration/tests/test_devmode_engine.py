@@ -36,11 +36,11 @@ BATCHES_PER_BLOCK_RANGE = (1, 100)
 MIN_TOTAL_BATCHES = 10
 
 # All nodes must reach this block for the test to pass.
-BLOCK_TO_REACH = 5
+BLOCK_TO_REACH = 55
 
 # Once all nodes reach the BLOCK_TO_REACH, the test will check for consensus at
 # this block. These are different because PoET occassionally forks.
-BLOCK_TO_CHECK_CONSENSUS = 5
+BLOCK_TO_CHECK_CONSENSUS = 50
 
 
 class TestDevmodeEngine(unittest.TestCase):
