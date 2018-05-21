@@ -40,6 +40,7 @@ use proto::transaction_receipt::TransactionReceipt;
 pub enum ChainControllerError {
     QueueRecvError(RecvError),
     ChainIdError(io::Error),
+    ChainUpdateError(String),
     BlockValidationError(ValidationError),
 }
 
