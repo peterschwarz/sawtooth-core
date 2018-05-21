@@ -28,7 +28,7 @@ use sawtooth_sdk::consensus::{engine::*, service::Service};
 const DEFAULT_WAIT_TIME: u64 = 0;
 
 pub struct DevmodeService {
-    pub service: Box<Service>,
+    service: Box<Service>,
 }
 
 impl DevmodeService {
