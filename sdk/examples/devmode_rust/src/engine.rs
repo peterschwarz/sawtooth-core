@@ -181,16 +181,18 @@ impl Engine for DevmodeEngine {
 
         debug!("Entering loop with wait time {:?}", wait_time);;
 
+        // 1. Wait for an incoming message.
+        // 2. Check for exit.
+        // 3. Handle the message.
+        // 4. Check for publishing.
         loop {
-            if !published_at_height && time::Instant::now().duration_since(start) > wait_time {
-                debug!("Timer expired -- publishing block");
-                service.finalize_block();
-                published_at_height = true;
+            let incoming_message = updates.recv_timeout(time::Duration::from_millis(10));
+
+            if self.exit.get() {
+                break;
             }
 
-            // While the new block is getting built, keep validating
-            // incoming new blocks.
-            match updates.recv_timeout(time::Duration::from_millis(10)) {
+            match incoming_message {
                 Ok(update) => {
                     debug!("Received message: {:?}", update);
 
@@ -255,8 +257,10 @@ impl Engine for DevmodeEngine {
                 Err(RecvTimeoutError::Timeout) => {}
             }
 
-            if self.exit.get() {
-                break;
+            if !published_at_height && time::Instant::now().duration_since(start) > wait_time {
+                debug!("Timer expired -- publishing block");
+                service.finalize_block();
+                published_at_height = true;
             }
         }
     }
