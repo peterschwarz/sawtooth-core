@@ -111,7 +111,11 @@ impl DevmodeService {
 
     fn cancel_block(&mut self) {
         debug!("Canceling block");
-        self.service.cancel_block().expect("Failed to cancel block");
+        match self.service.cancel_block() {
+            Ok(_) => {},
+            Err(Error::InvalidState(_)) => {},
+            Err(err) => { panic!("Failed to cancel block: {:?}", err); }
+        };
     }
 
     // Calculate the time to wait between publishing blocks. When in
