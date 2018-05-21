@@ -77,7 +77,17 @@ services:
     working_dir: /root
     command: "bash -c \"\
         sawadm keygen && \
-        sawadm genesis && \
+        sawset genesis \
+          -k /etc/sawtooth/keys/validator.priv \
+          -o config-genesis.batch && \
+        sawset proposal create \
+          -k /etc/sawtooth/keys/validator.priv \
+          sawtooth.consensus.algorithm=None \
+          sawtooth.consensus.min_wait_time=1 \
+          sawtooth.consensus.max_wait_time=3 \
+          -o config.batch && \
+        sawadm genesis \
+          config-genesis.batch config.batch && \
         sawtooth-validator -vv \
             --endpoint tcp://validator-0:8800 \
             --bind component:tcp://eth0:4004 \

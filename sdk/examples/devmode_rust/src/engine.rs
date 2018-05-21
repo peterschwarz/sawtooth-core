@@ -143,9 +143,9 @@ impl DevmodeService {
 
                 let wait_time = rand::thread_rng().gen_range(min_wait_time, max_wait_time);
 
-                time::Duration::new(wait_time, 0)
+                time::Duration::from_secs(wait_time)
             }
-            Err(_) => time::Duration::new(0, 0),
+            Err(_) => time::Duration::from_secs(0),
         }
     }
 }
