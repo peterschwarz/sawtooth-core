@@ -70,9 +70,15 @@ impl DevmodeService {
 
     fn finalize_block(&mut self) {
         debug!("Finalizing block");
-        self.service
-            .finalize_block(Vec::from(&b"Devmode"[..]))
-            .expect("Failed to finalize");
+        let mut query_result = self.service.finalize_block(Vec::from(&b"Devmode"[..]));
+
+        while let Err(Error::BlockNotReady) = query_result {
+            warn!("Block not ready");
+            sleep(time::Duration::from_secs(1));
+            query_result = self.service.finalize_block(Vec::from(&b"Devmode"[..]));
+        }
+
+        query_result.expect("Failed to finalize block");
     }
 
     fn check_block(&mut self, block_id: BlockId) {
