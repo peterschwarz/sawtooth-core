@@ -18,9 +18,11 @@
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
-use std::cell::RefCell;
+use std::marker::Send;
+use std::marker::Sync;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -63,7 +65,7 @@ pub trait ChainObserver {
     fn chain_update(&mut self, block: &Block, receipts: &[&TransactionReceipt]);
 }
 
-pub trait BlockCache {
+pub trait BlockCache: Send + Sync {
     fn contains(&self, block_id: &str) -> bool;
 
     fn put(&mut self, block: Block);
@@ -76,7 +78,7 @@ pub enum ValidationError {
     BlockValidationFailure(String),
 }
 
-pub trait BlockValidator {
+pub trait BlockValidator: Send + Sync {
     fn in_process(&self, block_id: &str) -> bool;
     fn in_pending(&self, block_id: &str) -> bool;
     fn validate_block(&self, block: Block) -> Result<(), ValidationError>;
@@ -93,14 +95,13 @@ pub struct BlockValidationResult {
     pub current_chain: Vec<Block>,
 
     pub committed_batches: Vec<Batch>,
-    pub uncommitted_batches: Vec<Batch>
+    pub uncommitted_batches: Vec<Batch>,
 }
 
 // This should be in a validation Module
-pub struct ExecutionResults {
-}
+pub struct ExecutionResults {}
 
-pub trait ChainWriter {
+pub trait ChainWriter: Send + Sync {
     fn update_chain(
         &mut self,
         new_chain: &[Block],
@@ -108,43 +109,46 @@ pub trait ChainWriter {
     ) -> Result<(), ChainControllerError>;
 }
 
-#[derive(Clone)]
 struct ChainControllerState<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> {
     block_cache: BC,
     block_validator: BV,
     chain_writer: CW,
     chain_head: Option<Block>,
     chain_id_manager: ChainIdManager,
-    observers: Arc<RefCell<Vec<Box<ChainObserver>>>>,
+    observers: Vec<Box<ChainObserver + Send + Sync>>,
 }
 
 #[derive(Clone)]
 pub struct ChainController<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> {
     state: Arc<RwLock<ChainControllerState<BC, BV, CW>>>,
+    stop_handle: Arc<Mutex<Option<ChainThreadStopHandle>>>,
 }
 
-impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV, CW> {
+impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + 'static>
+    ChainController<BC, BV, CW>
+{
     pub fn new(
         block_cache: BC,
         block_validator: BV,
         chain_writer: CW,
         data_dir: String,
-        observers: Vec<Box<ChainObserver>>,
+        observers: Vec<Box<ChainObserver + Send + Sync>>,
     ) -> Self {
         ChainController {
-            state: Arc::new(RwLock::new(
-                    ChainControllerState {
-                        block_cache,
-                        block_validator,
-                        chain_writer,
-                        chain_id_manager: ChainIdManager::new(data_dir),
-                        observers: Arc::new(RefCell::new(observers)),
-                        chain_head: None,
-                    }))
+            state: Arc::new(RwLock::new(ChainControllerState {
+                block_cache,
+                block_validator,
+                chain_writer,
+                chain_id_manager: ChainIdManager::new(data_dir),
+                observers,
+                // Arc::new(Mutex::new(observers)),
+                chain_head: None,
+            })),
+            stop_handle: Arc::new(Mutex::new(None)),
         }
     }
 
-    fn on_block_received(&mut self, block: Block) -> Result<(), ChainControllerError> {
+    pub fn on_block_received(&mut self, block: Block) -> Result<(), ChainControllerError> {
         let mut state = self.state
             .write()
             .expect("No lock holder should have poisoned the lock");
@@ -168,9 +172,10 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
         Ok(())
     }
 
-
     pub fn has_block(&self, block_id: &str) -> bool {
-        let state = self.state.read().expect("No lock holder should have poisoned the lock");
+        let state = self.state
+            .read()
+            .expect("No lock holder should have poisoned the lock");
         has_block_no_lock(&state, block_id)
     }
 
@@ -180,7 +185,8 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
             .expect("No lock holder should have poisoned the lock");
 
         let new_block = result.block;
-        if state.chain_head
+        if state
+            .chain_head
             .as_ref()
             .map(|block| block.header_signature != new_block.header_signature)
             .unwrap_or(false)
@@ -192,12 +198,19 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
                 new_block
             );
             debug!("Verify block again: {}", new_block);
-            submit_blocks_for_verification(&mut state, &[new_block]);
+            if let Err(err) = submit_blocks_for_verification(&mut state, &[new_block]) {
+                error!("Unable to submit block for verification: {:?}", err);
+            }
         } else if commit_new_block {
             state.chain_head = Some(new_block);
 
-            state.chain_writer
-                .update_chain(&result.new_chain, &result.current_chain);
+            if let Err(err) = state
+                .chain_writer
+                .update_chain(&result.new_chain, &result.current_chain)
+            {
+                error!("Unable to update chain {:?}", err);
+                return;
+            }
 
             info!(
                 "Chain head updated to {}",
@@ -228,7 +241,7 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
 
             for block in new_chain {
                 let receipts: Vec<TransactionReceipt> = make_receipts(&result.execution_results);
-                for observer in state.observers.borrow_mut().iter_mut() {
+                for observer in state.observers.iter_mut() {
                     observer.chain_update(&block, &receipts.iter().collect::<Vec<_>>());
                 }
             }
@@ -237,16 +250,50 @@ impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> ChainController<BC, BV
         }
     }
 
+    fn start(&self, block_queue: Receiver<Block>) {
+        let mut stop_handle = self.stop_handle.lock().unwrap();
+        if stop_handle.is_none() {
+            let mut thread_chain_controller = ChainController {
+                state: self.state.clone(),
+                // This instance doesn't share the stop handle: it's not a
+                // publicly accessible instance
+                stop_handle: Arc::new(Mutex::new(None)),
+            };
+            let exit_flag = Arc::new(AtomicBool::new(false));
+            let mut chain_thread =
+                ChainThread::new(thread_chain_controller, block_queue, exit_flag.clone());
+            *stop_handle = Some(ChainThreadStopHandle::new(exit_flag));
+            thread::spawn(move || {
+                if let Err(err) = chain_thread.run() {
+                    error!("Error occurred during ChainController loop: {:?}", err);
+                }
+            });
+        }
+    }
+
+    fn stop(&mut self) {
+        let mut stop_handle = self.stop_handle.lock().unwrap();
+        if stop_handle.is_some() {
+            let handle: ChainThreadStopHandle = stop_handle.take().unwrap();
+            handle.stop();
+        }
+    }
 }
 
-fn has_block_no_lock<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(state: &ChainControllerState<BC, BV, CW>, block_id: &str) -> bool {
+fn has_block_no_lock<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
+    state: &ChainControllerState<BC, BV, CW>,
+    block_id: &str,
+) -> bool {
     state.block_cache.contains(block_id) || state.block_validator.in_process(block_id)
         || state.block_validator.in_pending(block_id)
 }
 
 /// This is used by a non-genesis journal when it has received the
 /// genesis block from the genesis validator
-fn set_genesis<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(state: &mut ChainControllerState<BC, BV, CW>, block: Block) -> Result<(), ChainControllerError> {
+fn set_genesis<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
+    state: &mut ChainControllerState<BC, BV, CW>,
+    block: Block,
+) -> Result<(), ChainControllerError> {
     if block.previous_block_id == journal::NULL_BLOCK_IDENTIFIER {
         let chain_id = state.chain_id_manager.get_block_chain_id()?;
         if chain_id
@@ -263,7 +310,8 @@ fn set_genesis<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(state: &mut 
             state.block_validator.validate_block(block.clone())?;
 
             if chain_id.is_none() {
-                state.chain_id_manager
+                state
+                    .chain_id_manager
                     .save_block_chain_id(&block.header_signature)?;
             }
 
@@ -292,42 +340,39 @@ fn notify_on_chain_updated<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
     unimplemented!()
 }
 
-
 fn make_receipts(result: &[ExecutionResults]) -> Vec<TransactionReceipt> {
     unimplemented!()
 }
 
-struct ChainThread {
+struct ChainThread<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> {
+    chain_controller: ChainController<BC, BV, CW>,
     block_queue: Receiver<Block>,
-    exit: AtomicBool,
+    exit: Arc<AtomicBool>,
 }
 
-trait StopHandle {
+trait StopHandle: Clone {
     fn stop(&self);
 }
 
-impl ChainThread {
-    fn new(block_queue: Receiver<Block>) -> Self {
+impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + 'static>
+    ChainThread<BC, BV, CW>
+{
+    fn new(
+        chain_controller: ChainController<BC, BV, CW>,
+        block_queue: Receiver<Block>,
+        exit_flag: Arc<AtomicBool>,
+    ) -> Self {
         ChainThread {
+            chain_controller,
             block_queue,
-            exit: AtomicBool::new(false),
+            exit: exit_flag,
         }
-    }
-
-    fn start(&mut self) {
-        /*
-        thread::spawn(move || {
-            if let Err(err) = self.run() {
-                error!("Error occurred during ChainController loop: {:?}", err);
-            }
-        });
-        */
     }
 
     fn run(&mut self) -> Result<(), ChainControllerError> {
         loop {
             let block = self.block_queue.recv()?;
-            // self.chain_controller.on_block_received(block)?;
+            self.chain_controller.on_block_received(block)?;
 
             if self.exit.load(Ordering::Relaxed) {
                 break Ok(());
@@ -335,7 +380,19 @@ impl ChainThread {
         }
     }
 }
-impl StopHandle for ChainThread {
+
+#[derive(Clone)]
+struct ChainThreadStopHandle {
+    exit: Arc<AtomicBool>,
+}
+
+impl ChainThreadStopHandle {
+    fn new(exit_flag: Arc<AtomicBool>) -> Self {
+        ChainThreadStopHandle { exit: exit_flag }
+    }
+}
+
+impl StopHandle for ChainThreadStopHandle {
     fn stop(&self) {
         self.exit.store(true, Ordering::Relaxed)
     }
