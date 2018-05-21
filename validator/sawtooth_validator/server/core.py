@@ -28,7 +28,8 @@ from sawtooth_validator.consensus.proxy import ConsensusProxy
 from sawtooth_validator.database.indexed_database import IndexedDatabase
 from sawtooth_validator.database.lmdb_nolock_database import LMDBNoLockDatabase
 from sawtooth_validator.database.native_lmdb import NativeLmdbDatabase
-from sawtooth_validator.journal.block_validator import BlockValidator
+from sawtooth_validator.journal import block_validator
+from sawtooth_validator.journal import block_validator_ce
 from sawtooth_validator.journal import publisher
 from sawtooth_validator.journal import publisher_ce
 from sawtooth_validator.journal import chain
@@ -330,15 +331,26 @@ class Validator(object):
                 batch_observers=[batch_tracker],
                 batch_injector_factory=batch_injector_factory)
 
-        block_validator = BlockValidator(
-            block_cache=block_cache,
-            state_view_factory=state_view_factory,
-            transaction_executor=transaction_executor,
-            squash_handler=context_manager.get_squash_handler(),
-            identity_signer=identity_signer,
-            data_dir=data_dir,
-            config_dir=config_dir,
-            permission_verifier=permission_verifier)
+        if consensus_engine_enabled:
+            block_validator = block_validator_ce.BlockValidator(
+                block_cache=block_cache,
+                state_view_factory=state_view_factory,
+                transaction_executor=transaction_executor,
+                squash_handler=context_manager.get_squash_handler(),
+                identity_signer=identity_signer,
+                data_dir=data_dir,
+                config_dir=config_dir,
+                permission_verifier=permission_verifier)
+        else:
+            block_validator = block_validator.BlockValidator(
+                block_cache=block_cache,
+                state_view_factory=state_view_factory,
+                transaction_executor=transaction_executor,
+                squash_handler=context_manager.get_squash_handler(),
+                identity_signer=identity_signer,
+                data_dir=data_dir,
+                config_dir=config_dir,
+                permission_verifier=permission_verifier)
 
         if consensus_engine_enabled:
             chain_controller = chain_ce.ChainController(
