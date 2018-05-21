@@ -141,12 +141,15 @@ impl DevmodeService {
                 let min_wait_time: u64 = ints[0];
                 let max_wait_time: u64 = ints[1];
 
+                debug!("Min: {:?} -- Max: {:?}", min_wait_time, max_wait_time);
+
                 if min_wait_time >= max_wait_time {
-                    return time::Duration::new(0, 0);
+                    return time::Duration::new(2, 0);
                 }
 
                 let wait_time = rand::thread_rng().gen_range(min_wait_time, max_wait_time);
 
+                debug!("Wait time: {:?}", wait_time);
                 time::Duration::from_secs(wait_time)
             }
             Err(_) => time::Duration::from_secs(0),
@@ -170,19 +173,18 @@ impl Engine for DevmodeEngine {
 
         let mut chain_head = service.wait_for_chain_head();
         let mut wait_time = service.calculate_wait_time(chain_head.block_id.clone());
+        let mut published_at_height = false;
         let mut start = time::Instant::now();
 
         service.initialize_block();
 
+        debug!("Entering loop with wait time {:?}", wait_time);;
+
         loop {
-            if time::Instant::now().duration_since(start) > wait_time {
+            if !published_at_height && time::Instant::now().duration_since(start) > wait_time {
+                debug!("Timer expired -- publishing block");
                 service.finalize_block();
-
-                chain_head = service.get_chain_head();
-                wait_time = service.calculate_wait_time(chain_head.block_id.clone());
-                start = time::Instant::now();
-
-                service.initialize_block();
+                published_at_height = true;
             }
 
             // While the new block is getting built, keep validating
@@ -190,9 +192,11 @@ impl Engine for DevmodeEngine {
             match updates.recv_timeout(time::Duration::from_millis(10)) {
                 Ok(update) => {
                     debug!("Received message: {:?}", update);
+
                     match update {
                         Update::BlockNew(block) => {
                             info!("Checking block {:?} for consensus", block);
+
                             if check_consensus(&block) {
                                 info!("Block {:?} passed consensus check", block);
                                 service.check_block(block.block_id);
@@ -204,6 +208,7 @@ impl Engine for DevmodeEngine {
 
                         Update::BlockValid(block_id) => {
                             let block = service.get_block(block_id.clone());
+                            chain_head = service.get_chain_head();
 
                             info!("Choosing between chain heads -- current: {:?} -- new: {:?}",
                                   chain_head, block);
@@ -224,13 +229,13 @@ impl Engine for DevmodeEngine {
 
                         // The chain head was updated, so abandon the
                         // block in progress and start a new one.
-                        Update::BlockCommit(_) => {
+                        Update::BlockCommit(new_chain_head) => {
                             info!("Chain head updated, abandoning block in progress");
 
                             service.cancel_block();
 
-                            chain_head = service.get_chain_head();
-                            wait_time = service.calculate_wait_time(chain_head.block_id.clone());
+                            wait_time = service.calculate_wait_time(new_chain_head.clone());
+                            published_at_height = false;
                             start = time::Instant::now();
 
                             service.initialize_block();
