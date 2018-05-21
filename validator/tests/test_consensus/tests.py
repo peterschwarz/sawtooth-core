@@ -6,10 +6,6 @@ from sawtooth_validator.consensus.proxy import ConsensusProxy
 
 from sawtooth_validator.journal.publisher import FinalizeBlockResult
 
-from sawtooth_validator.protobuf.consensus_pb2 import ConsensusBlock
-from sawtooth_validator.protobuf.consensus_pb2 import ConsensusSettingsEntry
-from sawtooth_validator.protobuf.consensus_pb2 import ConsensusStateEntry
-
 
 class TestHandlers(unittest.TestCase):
 
@@ -112,6 +108,14 @@ class TestHandlers(unittest.TestCase):
             request.block_id)
 
     def test_consensus_blocks_get_handler(self):
+        self.mock_proxy.blocks_get.return_value = [
+            Mock(
+                identifier='abcd',
+                previous_block_id='abcd',
+                header_signature='abcd',
+                signer_id='abcd',
+                block_num=1,
+                consensus=b'consensus')]
         handler = handlers.ConsensusBlocksGetHandler(self.mock_proxy)
         request_class = handler.request_class
         request = request_class()
@@ -121,6 +125,12 @@ class TestHandlers(unittest.TestCase):
             request.block_ids)
 
     def test_consensus_chain_head_get_handler(self):
+        self.mock_proxy.chain_head_get.return_value = Mock(
+            identifier='abcd',
+            previous_block_id='abcd',
+            header_signature='abcd',
+            block_num=1,
+            consensus=b'consensus')
         handler = handlers.ConsensusChainHeadGetHandler(self.mock_proxy)
         request_class = handler.request_class
         request = request_class()
@@ -128,6 +138,7 @@ class TestHandlers(unittest.TestCase):
         self.mock_proxy.chain_head_get.assert_called_with()
 
     def test_consensus_settings_get_handler(self):
+        self.mock_proxy.settings_get.return_value = [('key', 'value')]
         handler = handlers.ConsensusSettingsGetHandler(self.mock_proxy)
         request_class = handler.request_class
         request = request_class()
@@ -138,6 +149,7 @@ class TestHandlers(unittest.TestCase):
             request.block_id, request.keys)
 
     def test_consensus_state_get_handler(self):
+        self.mock_proxy.state_get.return_value = [('address', b'data')]
         handler = handlers.ConsensusStateGetHandler(self.mock_proxy)
         request_class = handler.request_class
         request = request_class()
@@ -233,55 +245,49 @@ class TestProxy(unittest.TestCase):
 
     # Using blockstore and state database
     def test_blocks_get(self):
-        self._mock_block_cache[b'block1'.hex()] = Mock(
+        block_1 = Mock(
             identifier=b'id-1',
             previous_block_id=b'prev-1',
             header_signature=b'sign-1',
             block_num=1,
             consensus=b'consensus')
 
-        self._mock_block_cache[b'block2'.hex()] = Mock(
+        self._mock_block_cache[b'block1'.hex()] = block_1
+
+        block_2 = Mock(
             identifier=b'id-2',
             previous_block_id=b'prev-2',
             header_signature=b'sign-2',
             block_num=2,
             consensus=b'consensus')
 
-        block_1, block_2 = self._proxy.blocks_get([b'block1', b'block2'])
+        self._mock_block_cache[b'block2'.hex()] = block_2
+
+        proxy_block_1, proxy_block_2 = self._proxy.blocks_get([
+            b'block1',
+            b'block2'])
 
         self.assertEqual(
             block_1,
-            ConsensusBlock(
-                block_id=b'id-1',
-                previous_id=b'prev-1',
-                signer_id=b'sign-1',
-                block_num=1,
-                payload=b'consensus'))
+            proxy_block_1)
 
         self.assertEqual(
             block_2,
-            ConsensusBlock(
-                block_id=b'id-2',
-                previous_id=b'prev-2',
-                signer_id=b'sign-2',
-                block_num=2,
-                payload=b'consensus'))
+            proxy_block_2)
 
     def test_chain_head_get(self):
-        self._mock_chain_controller.chain_head = Mock(
+        chain_head = Mock(
             identifier=b'id-2',
             previous_block_id=b'prev-2',
             header_signature=b'sign-2',
             block_num=2,
             consensus=b'consensus')
+
+        self._mock_chain_controller.chain_head = chain_head
+
         self.assertEqual(
             self._proxy.chain_head_get(),
-            ConsensusBlock(
-                block_id=b'id-2',
-                previous_id=b'prev-2',
-                signer_id=b'sign-2',
-                block_num=2,
-                payload=b'consensus'))
+            chain_head)
 
     def test_settings_get(self):
         self._mock_block_cache[b'block'.hex()] = MockBlock()
@@ -289,12 +295,8 @@ class TestProxy(unittest.TestCase):
         self.assertEqual(
             self._proxy.settings_get(b'block', ['key1', 'key2']),
             [
-                ConsensusSettingsEntry(
-                    key='key1',
-                    value='mock-key1'),
-                ConsensusSettingsEntry(
-                    key='key2',
-                    value='mock-key2')
+                ('key1', 'mock-key1'),
+                ('key2', 'mock-key2'),
             ])
 
     def test_state_get(self):
@@ -303,12 +305,8 @@ class TestProxy(unittest.TestCase):
         self.assertEqual(
             self._proxy.state_get(b'block', ['address-1', 'address-2']),
             [
-                ConsensusStateEntry(
-                    address='address-1',
-                    data=b'mock-address-1'),
-                ConsensusStateEntry(
-                    address='address-2',
-                    data=b'mock-address-2')
+                ('address-1', b'mock-address-1'),
+                ('address-2', b'mock-address-2'),
             ])
 
 
