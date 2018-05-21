@@ -25,6 +25,8 @@ use rand::Rng;
 
 use sawtooth_sdk::consensus::{engine::*, service::Service};
 
+const DEFAULT_WAIT_TIME: u64 = 0;
+
 pub struct DevmodeService {
     pub service: Box<Service>,
 }
@@ -118,8 +120,7 @@ impl DevmodeService {
         };
     }
 
-    // Calculate the time to wait between publishing blocks. When in
-    // doubt, pick 0.
+    // Calculate the time to wait between publishing blocks.
     fn calculate_wait_time(&mut self, chain_head_id: BlockId) -> time::Duration {
         match self.service.get_settings(
             chain_head_id,
@@ -144,7 +145,7 @@ impl DevmodeService {
                 debug!("Min: {:?} -- Max: {:?}", min_wait_time, max_wait_time);
 
                 if min_wait_time >= max_wait_time {
-                    return time::Duration::new(2, 0);
+                    return time::Duration::from_secs(DEFAULT_WAIT_TIME);
                 }
 
                 let wait_time = rand::thread_rng().gen_range(min_wait_time, max_wait_time);
@@ -152,7 +153,7 @@ impl DevmodeService {
                 debug!("Wait time: {:?}", wait_time);
                 time::Duration::from_secs(wait_time)
             }
-            Err(_) => time::Duration::from_secs(0),
+            Err(_) => time::Duration::from_secs(DEFAULT_WAIT_TIME),
         }
     }
 }
