@@ -293,7 +293,7 @@ class Validator(object):
 
         # -- Setup Journal -- #
         batch_injector_factory = DefaultBatchInjectorFactory(
-            block_store=block_store,
+            block_cache=block_cache,
             state_view_factory=state_view_factory,
             signer=identity_signer)
 
