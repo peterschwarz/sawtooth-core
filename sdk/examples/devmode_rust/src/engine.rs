@@ -15,7 +15,6 @@
  * ------------------------------------------------------------------------------
  */
 
-use std::cmp::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread::sleep;
 use std::time;
@@ -227,16 +226,13 @@ impl Engine for DevmodeEngine {
                             );
 
                             // Advance the chain if possible.
-                            match block.block_num.cmp(&chain_head.block_num) {
-                                Ordering::Greater => service.commit_block(block_id),
-                                Ordering::Less => service.ignore_block(block_id),
-                                Ordering::Equal => {
-                                    if block.block_id > chain_head.block_id {
-                                        service.commit_block(block_id)
-                                    } else {
-                                        service.ignore_block(block_id)
-                                    }
-                                }
+                            if block.block_num > chain_head.block_num
+                                || (block.block_num == chain_head.block_num
+                                    && block.block_id > chain_head.block_id)
+                            {
+                                service.commit_block(block_id);
+                            } else {
+                                service.ignore_block(block_id);
                             }
                         }
 
