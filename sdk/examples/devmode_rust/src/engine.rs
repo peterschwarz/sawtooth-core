@@ -162,7 +162,8 @@ impl DevmodeService {
             DEFAULT_WAIT_TIME
         };
 
-        debug!("Wait time: {:?}", wait_time);
+        info!("Wait time: {:?}", wait_time);
+
         time::Duration::from_secs(wait_time)
     }
 }
@@ -188,8 +189,6 @@ impl Engine for DevmodeEngine {
 
         service.initialize_block();
 
-        debug!("Entering loop with wait time {:?}", wait_time);;
-
         // 1. Wait for an incoming message.
         // 2. Check for exit.
         // 3. Handle the message.
@@ -207,13 +206,13 @@ impl Engine for DevmodeEngine {
 
                     match update {
                         Update::BlockNew(block) => {
-                            info!("Checking block {:?} for consensus", block);
+                            info!("Checking consensus data for {:?}", block);
 
                             if check_consensus(&block) {
-                                info!("Block {:?} passed consensus check", block);
+                                info!("Passed consensus check: {:?}", block);
                                 service.check_block(block.block_id);
                             } else {
-                                info!("Block {:?} failed consensus check", block);
+                                info!("Failed consensus check: {:?}", block);
                                 service.fail_block(block.block_id);
                             }
                         }
@@ -232,8 +231,10 @@ impl Engine for DevmodeEngine {
                                 || (block.block_num == chain_head.block_num
                                     && block.block_id > chain_head.block_id)
                             {
+                                info!("Committing {:?}", block);
                                 service.commit_block(block_id);
                             } else {
+                                info!("Ignoring {:?}", block);
                                 service.ignore_block(block_id);
                             }
                         }
@@ -241,7 +242,10 @@ impl Engine for DevmodeEngine {
                         // The chain head was updated, so abandon the
                         // block in progress and start a new one.
                         Update::BlockCommit(new_chain_head) => {
-                            info!("Chain head updated, abandoning block in progress");
+                            info!(
+                                "Chain head updated to {:?}, abandoning block in progress",
+                                new_chain_head
+                            );
 
                             service.cancel_block();
 
@@ -259,7 +263,7 @@ impl Engine for DevmodeEngine {
                 }
 
                 Err(RecvTimeoutError::Disconnected) => {
-                    println!("disconnected");
+                    error!("Disconnected from validator");
                     break;
                 }
 
@@ -267,7 +271,7 @@ impl Engine for DevmodeEngine {
             }
 
             if !published_at_height && time::Instant::now().duration_since(start) > wait_time {
-                debug!("Timer expired -- publishing block");
+                info!("Timer expired -- publishing block");
                 service.finalize_block();
                 published_at_height = true;
             }
