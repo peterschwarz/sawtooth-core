@@ -46,7 +46,7 @@ pub enum ChainControllerError {
 
 impl From<RecvError> for ChainControllerError {
     fn from(err: RecvError) -> Self {
-        ChainControllerError::QueueRecvError(RecvError)
+        ChainControllerError::QueueRecvError(err)
     }
 }
 
@@ -62,8 +62,25 @@ impl From<ValidationError> for ChainControllerError {
     }
 }
 
-pub trait ChainObserver {
+pub trait ChainObserver: Send + Sync {
     fn chain_update(&mut self, block: &Block, receipts: &[&TransactionReceipt]);
+}
+
+pub trait ChainHeadUpdateObserver: Send + Sync {
+    /// Called when the chain head has updated.
+    ///
+    /// Args:
+    ///     block: the new chain head
+    ///     committed_batches: all of the batches that have been committed
+    ///         on the given fork. This may be across multiple blocks.
+    ///     uncommitted_batches: all of the batches that have been uncommitted
+    ///         from the previous fork, if one was dropped.
+    fn on_chain_head_updated(
+        &mut self,
+        block: Block,
+        committed_batches: Vec<Batch>,
+        uncommitted_batches: Vec<Batch>,
+    );
 }
 
 pub trait BlockCache: Send + Sync {
@@ -83,6 +100,10 @@ pub trait BlockValidator: Send + Sync {
     fn in_process(&self, block_id: &str) -> bool;
     fn in_pending(&self, block_id: &str) -> bool;
     fn validate_block(&self, block: Block) -> Result<(), ValidationError>;
+
+    fn submit_blocks_for_verification<F>(&self, blocks: &[Block], on_block_validated: F)
+    where
+        F: FnOnce(bool, BlockValidationResult);
 }
 
 // This should be in a validation module
@@ -90,7 +111,7 @@ pub struct BlockValidationResult {
     pub chain_head: Block,
     pub block: Block,
 
-    pub execution_results: Vec<ExecutionResults>,
+    pub execution_results: Vec<TransactionResult>,
 
     pub new_chain: Vec<Block>,
     pub current_chain: Vec<Block>,
@@ -100,7 +121,16 @@ pub struct BlockValidationResult {
 }
 
 // This should be in a validation Module
-pub struct ExecutionResults {}
+pub struct TransactionResult {
+    // pub signature: String,
+    // pub is_valid: bool,
+    // pub state_hash: String,
+    // pub state_changes: Vec<StateChange>,
+    // pub events: Vec<Event>,
+    // pub data: Vec<(String, Vec<u8>)>,
+    // pub error_message: String,
+    // pub error_data: Vec<u8>,
+}
 
 pub trait ChainWriter: Send + Sync {
     fn update_chain(
@@ -116,7 +146,8 @@ struct ChainControllerState<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>
     chain_writer: CW,
     chain_head: Option<Block>,
     chain_id_manager: ChainIdManager,
-    observers: Vec<Box<ChainObserver + Send + Sync>>,
+    chain_head_update_observer: Box<ChainHeadUpdateObserver>,
+    observers: Vec<Box<ChainObserver>>,
 }
 
 #[derive(Clone)]
@@ -133,7 +164,8 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         block_validator: BV,
         chain_writer: CW,
         data_dir: String,
-        observers: Vec<Box<ChainObserver + Send + Sync>>,
+        chain_head_update_observer: Box<ChainHeadUpdateObserver>,
+        observers: Vec<Box<ChainObserver>>,
     ) -> Self {
         ChainController {
             state: Arc::new(RwLock::new(ChainControllerState {
@@ -141,8 +173,8 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 block_validator,
                 chain_writer,
                 chain_id_manager: ChainIdManager::new(data_dir),
+                chain_head_update_observer,
                 observers,
-                // Arc::new(Mutex::new(observers)),
                 chain_head: None,
             })),
             stop_handle: Arc::new(Mutex::new(None)),
@@ -169,7 +201,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         }
 
         state.block_cache.put(block.clone());
-        submit_blocks_for_verification(&mut state, &[block])?;
+        self.submit_blocks_for_verification(&state.block_validator, &[block])?;
         Ok(())
     }
 
@@ -199,7 +231,9 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 new_block
             );
             debug!("Verify block again: {}", new_block);
-            if let Err(err) = submit_blocks_for_verification(&mut state, &[new_block]) {
+            if let Err(err) =
+                self.submit_blocks_for_verification(&state.block_validator, &[new_block])
+            {
                 error!("Unable to submit block for verification: {:?}", err);
             }
         } else if commit_new_block {
@@ -249,6 +283,24 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         } else {
             info!("Rejected new chain head: {}", new_block);
         }
+    }
+
+    fn submit_blocks_for_verification(
+        &self,
+        block_validator: &BV,
+        blocks: &[Block],
+    ) -> Result<(), ChainControllerError> {
+        let mut chain_controller_copy = ChainController {
+            state: self.state.clone(),
+            // This instance doesn't share the stop handle: it's not a
+            // publicly accessible instance
+            stop_handle: Arc::new(Mutex::new(None)),
+        };
+
+        block_validator.submit_blocks_for_verification(blocks, move |commit_new_block, result| {
+            chain_controller_copy.on_block_validated(commit_new_block, result)
+        });
+        Ok(())
     }
 
     fn start(&self, block_queue: Receiver<Block>) {
@@ -325,23 +377,20 @@ fn set_genesis<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
     Ok(())
 }
 
-fn submit_blocks_for_verification<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
-    state: &mut ChainControllerState<BC, BV, CW>,
-    blocks: &[Block],
-) -> Result<(), ChainControllerError> {
-    unimplemented!()
-}
-
 fn notify_on_chain_updated<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
     state: &mut ChainControllerState<BC, BV, CW>,
     block: Block,
     committed_batches: Vec<Batch>,
     uncommitted_batches: Vec<Batch>,
 ) {
-    unimplemented!()
+    state.chain_head_update_observer.on_chain_head_updated(
+        block,
+        committed_batches,
+        uncommitted_batches,
+    );
 }
 
-fn make_receipts(result: &[ExecutionResults]) -> Vec<TransactionReceipt> {
+fn make_receipts(result: &[TransactionResult]) -> Vec<TransactionReceipt> {
     unimplemented!()
 }
 

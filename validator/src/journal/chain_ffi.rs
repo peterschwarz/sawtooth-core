@@ -50,6 +50,7 @@ pub extern "C" fn chain_controller_new(
     block_store: *mut py_ffi::PyObject,
     block_cache: *mut py_ffi::PyObject,
     block_validator: *mut py_ffi::PyObject,
+    on_chain_updated: *mut py_ffi::PyObject,
     observers: *mut py_ffi::PyObject,
     data_directory: *const c_char,
     chain_controller_ptr: *mut *const c_void,
@@ -61,7 +62,12 @@ pub extern "C" fn chain_controller_new(
     if block_cache.is_null() {
         return ErrorCode::NullPointerProvided;
     }
+
     if block_validator.is_null() {
+        return ErrorCode::NullPointerProvided;
+    }
+
+    if on_chain_updated.is_null() {
         return ErrorCode::NullPointerProvided;
     }
 
@@ -80,14 +86,23 @@ pub extern "C" fn chain_controller_new(
         }
     };
 
+    println!("Acquiring GIL...");
     let py = unsafe { Python::assume_gil_acquired() };
+
+    println!("Borrowing Block Store...");
     let py_block_store = unsafe { PyObject::from_borrowed_ptr(py, block_store) };
+    println!("Borrowing Block Cache...");
     let py_block_cache = unsafe { PyObject::from_borrowed_ptr(py, block_cache) };
+    println!("Borrowing Block Validator...");
     let py_block_validator = unsafe { PyObject::from_borrowed_ptr(py, block_validator) };
+    println!("Borrowing on_chain_updated...");
+    let py_on_chain_updated = unsafe { PyObject::from_borrowed_ptr(py, on_chain_updated) };
+    println!("Borrowing observers...");
     let py_observers = unsafe { PyObject::from_borrowed_ptr(py, observers) };
 
+    println!("converting to wrappers");
     let observer_wrappers = if let Ok(py_list) = py_observers.extract::<PyList>(py) {
-        let mut res: Vec<Box<ChainObserver + Send + Sync>> = Vec::with_capacity(py_list.len(py));
+        let mut res: Vec<Box<ChainObserver>> = Vec::with_capacity(py_list.len(py));
         py_list
             .iter(py)
             .for_each(|pyobj| res.push(Box::new(PyChainObserver::new(pyobj))));
@@ -96,11 +111,13 @@ pub extern "C" fn chain_controller_new(
         return ErrorCode::InvalidPythonObject;
     };
 
+    println!("Creating ChainController...");
     let chain_controller = ChainController::new(
         PyBlockCache::new(py_block_cache),
         PyBlockValidator::new(py_block_validator),
         PyChainWriter::new(py_block_store),
         data_dir.into(),
+        Box::new(PyChainHeadUpdateObserver::new(py_on_chain_updated)),
         observer_wrappers,
     );
 
@@ -108,6 +125,17 @@ pub extern "C" fn chain_controller_new(
         *chain_controller_ptr = Box::into_raw(Box::new(chain_controller)) as *const c_void;
     }
 
+    println!("Returning!");
+    ErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn chain_controller_drop(chain_controller: *mut c_void) -> ErrorCode {
+    if chain_controller.is_null() {
+        return ErrorCode::NullPointerProvided;
+    }
+
+    unsafe { Box::from_raw(chain_controller) };
     ErrorCode::Success
 }
 
@@ -217,6 +245,38 @@ impl BlockValidator for PyBlockValidator {
                 ValidationError::BlockValidationFailure(py_err.get_type(py).name(py).into_owned())
             })
     }
+
+    fn submit_blocks_for_verification<F>(&self, blocks: &[Block], on_block_validated: F)
+    where
+        F: FnOnce(bool, BlockValidationResult),
+    {
+        /*
+        let gil_guard = Python::acquire_gil();
+        let py = gil_guard.python();
+
+        let callback = |py: Python, can_commit: bool, result: PyObject| {
+            on_block_validated(
+                can_commit,
+                result.extract::<BlockValidationResult>(py).unwrap(),
+            );
+            Ok(0)
+        };
+
+        self.py_block_validator
+            .call_method(
+                py,
+                "submit_blocks_for_verification",
+                (blocks, py_fn!(py, callback(can_commit, result))),
+                None,
+            )
+            .map(|_| ())
+            .map_err(|py_err| {
+                py_err.print(py);
+                ()
+            })
+            .unwrap_or(())
+            */
+    }
 }
 
 struct PyChainWriter {
@@ -272,7 +332,40 @@ impl ChainObserver for PyChainObserver {
                 py_err.print(py);
                 ()
             })
-            .unwrap()
+            .unwrap_or(())
+    }
+}
+
+struct PyChainHeadUpdateObserver {
+    py_on_chain_updated: PyObject,
+}
+
+impl PyChainHeadUpdateObserver {
+    fn new(py_on_chain_updated: PyObject) -> Self {
+        PyChainHeadUpdateObserver {
+            py_on_chain_updated,
+        }
+    }
+}
+
+impl ChainHeadUpdateObserver for PyChainHeadUpdateObserver {
+    fn on_chain_head_updated(
+        &mut self,
+        block: Block,
+        committed_batches: Vec<Batch>,
+        uncommitted_batches: Vec<Batch>,
+    ) {
+        let gil_guard = Python::acquire_gil();
+        let py = gil_guard.python();
+
+        self.py_on_chain_updated
+            .call(py, (block, committed_batches, uncommitted_batches), None)
+            .map(|_| ())
+            .map_err(|py_err| {
+                py_err.print(py);
+                ()
+            })
+            .unwrap_or(())
     }
 }
 
@@ -435,5 +528,20 @@ fn proto_txn_to_txn(proto_txn: &mut ProtoTxn) -> Transaction {
         nonce: txn_header.take_nonce(),
         payload_sha512: txn_header.take_payload_sha512(),
         signer_public_key: txn_header.take_signer_public_key(),
+    }
+}
+
+impl<'source> FromPyObject<'source> for BlockValidationResult {
+    fn extract(py: Python, obj: &'source PyObject) -> cpython::PyResult<Self> {
+        Ok(BlockValidationResult {
+            chain_head: obj.getattr(py, "chain_head")?.extract(py)?,
+            block: obj.getattr(py, "block")?.extract(py)?,
+            execution_results: vec![],// obj.getattr(py, "execution_results")?.extract(py)?,
+            new_chain: obj.getattr(py, "new_chain")?.extract(py)?,
+            current_chain: obj.getattr(py, "current_chain")?.extract(py)?,
+
+            committed_batches: obj.getattr(py, "committed_batches")?.extract(py)?,
+            uncommitted_batches: obj.getattr(py, "uncommitted_batches")?.extract(py)?,
+        })
     }
 }

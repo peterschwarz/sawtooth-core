@@ -15,6 +15,7 @@
  * ------------------------------------------------------------------------------
  */
 extern crate cbor;
+#[macro_use]
 extern crate cpython;
 extern crate crypto;
 extern crate hex;
