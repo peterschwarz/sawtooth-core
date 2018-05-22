@@ -15,7 +15,6 @@
  * ------------------------------------------------------------------------------
  */
 
-use std::cmp::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread::sleep;
 use std::time;
@@ -124,16 +123,22 @@ impl DevmodeService {
         };
     }
 
-    // Calculate the time to wait between publishing blocks.
+    // Calculate the time to wait between publishing blocks. This will be a
+    // random number between the settings sawtooth.consensus.min_wait_time and
+    // sawtooth.consensus.max_wait_time if max > min, else DEFAULT_WAIT_TIME. If
+    // there is an error parsing those settings, the time will be
+    // DEFAULT_WAIT_TIME.
     fn calculate_wait_time(&mut self, chain_head_id: BlockId) -> time::Duration {
-        match self.service.get_settings(
+        let settings_result = self.service.get_settings(
             chain_head_id,
             vec![
                 String::from("sawtooth.consensus.min_wait_time"),
                 String::from("sawtooth.consensus.max_wait_time"),
             ],
-        ) {
-            Ok(settings) => {
+        );
+
+        let wait_time = if let Ok(settings) = settings_result {
+            {
                 let ints: Vec<u64> = vec![
                     settings.get("sawtooth.consensus.min_wait_time").unwrap(),
                     settings.get("sawtooth.consensus.max_wait_time").unwrap(),
@@ -148,16 +153,18 @@ impl DevmodeService {
                 debug!("Min: {:?} -- Max: {:?}", min_wait_time, max_wait_time);
 
                 if min_wait_time >= max_wait_time {
-                    return time::Duration::from_secs(DEFAULT_WAIT_TIME);
+                    DEFAULT_WAIT_TIME
+                } else {
+                    rand::thread_rng().gen_range(min_wait_time, max_wait_time)
                 }
-
-                let wait_time = rand::thread_rng().gen_range(min_wait_time, max_wait_time);
-
-                debug!("Wait time: {:?}", wait_time);
-                time::Duration::from_secs(wait_time)
             }
-            Err(_) => time::Duration::from_secs(DEFAULT_WAIT_TIME),
-        }
+        } else {
+            DEFAULT_WAIT_TIME
+        };
+
+        info!("Wait time: {:?}", wait_time);
+
+        time::Duration::from_secs(wait_time)
     }
 }
 
@@ -182,8 +189,6 @@ impl Engine for DevmodeEngine {
 
         service.initialize_block();
 
-        debug!("Entering loop with wait time {:?}", wait_time);;
-
         // 1. Wait for an incoming message.
         // 2. Check for exit.
         // 3. Handle the message.
@@ -201,13 +206,13 @@ impl Engine for DevmodeEngine {
 
                     match update {
                         Update::BlockNew(block) => {
-                            info!("Checking block {:?} for consensus", block);
+                            info!("Checking consensus data for {:?}", block);
 
                             if check_consensus(&block) {
-                                info!("Block {:?} passed consensus check", block);
+                                info!("Passed consensus check: {:?}", block);
                                 service.check_block(block.block_id);
                             } else {
-                                info!("Block {:?} failed consensus check", block);
+                                info!("Failed consensus check: {:?}", block);
                                 service.fail_block(block.block_id);
                             }
                         }
@@ -222,23 +227,25 @@ impl Engine for DevmodeEngine {
                             );
 
                             // Advance the chain if possible.
-                            match block.block_num.cmp(&chain_head.block_num) {
-                                Ordering::Greater => service.commit_block(block_id),
-                                Ordering::Less => service.ignore_block(block_id),
-                                Ordering::Equal => {
-                                    if block.block_id > chain_head.block_id {
-                                        service.commit_block(block_id)
-                                    } else {
-                                        service.ignore_block(block_id)
-                                    }
-                                }
+                            if block.block_num > chain_head.block_num
+                                || (block.block_num == chain_head.block_num
+                                    && block.block_id > chain_head.block_id)
+                            {
+                                info!("Committing {:?}", block);
+                                service.commit_block(block_id);
+                            } else {
+                                info!("Ignoring {:?}", block);
+                                service.ignore_block(block_id);
                             }
                         }
 
                         // The chain head was updated, so abandon the
                         // block in progress and start a new one.
                         Update::BlockCommit(new_chain_head) => {
-                            info!("Chain head updated, abandoning block in progress");
+                            info!(
+                                "Chain head updated to {:?}, abandoning block in progress",
+                                new_chain_head
+                            );
 
                             service.cancel_block();
 
@@ -256,7 +263,7 @@ impl Engine for DevmodeEngine {
                 }
 
                 Err(RecvTimeoutError::Disconnected) => {
-                    println!("disconnected");
+                    error!("Disconnected from validator");
                     break;
                 }
 
@@ -264,7 +271,7 @@ impl Engine for DevmodeEngine {
             }
 
             if !published_at_height && time::Instant::now().duration_since(start) > wait_time {
-                debug!("Timer expired -- publishing block");
+                info!("Timer expired -- publishing block");
                 service.finalize_block();
                 published_at_height = true;
             }
