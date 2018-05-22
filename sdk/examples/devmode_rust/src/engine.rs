@@ -124,16 +124,22 @@ impl DevmodeService {
         };
     }
 
-    // Calculate the time to wait between publishing blocks.
+    // Calculate the time to wait between publishing blocks. This will be a
+    // random number between the settings sawtooth.consensus.min_wait_time and
+    // sawtooth.consensus.max_wait_time if max > min, else DEFAULT_WAIT_TIME. If
+    // there is an error parsing those settings, the time will be
+    // DEFAULT_WAIT_TIME.
     fn calculate_wait_time(&mut self, chain_head_id: BlockId) -> time::Duration {
-        match self.service.get_settings(
+        let settings_result = self.service.get_settings(
             chain_head_id,
             vec![
                 String::from("sawtooth.consensus.min_wait_time"),
                 String::from("sawtooth.consensus.max_wait_time"),
             ],
-        ) {
-            Ok(settings) => {
+        );
+
+        let wait_time = if let Ok(settings) = settings_result {
+            {
                 let ints: Vec<u64> = vec![
                     settings.get("sawtooth.consensus.min_wait_time").unwrap(),
                     settings.get("sawtooth.consensus.max_wait_time").unwrap(),
@@ -148,16 +154,17 @@ impl DevmodeService {
                 debug!("Min: {:?} -- Max: {:?}", min_wait_time, max_wait_time);
 
                 if min_wait_time >= max_wait_time {
-                    return time::Duration::from_secs(DEFAULT_WAIT_TIME);
+                    DEFAULT_WAIT_TIME
+                } else {
+                    rand::thread_rng().gen_range(min_wait_time, max_wait_time)
                 }
-
-                let wait_time = rand::thread_rng().gen_range(min_wait_time, max_wait_time);
-
-                debug!("Wait time: {:?}", wait_time);
-                time::Duration::from_secs(wait_time)
             }
-            Err(_) => time::Duration::from_secs(DEFAULT_WAIT_TIME),
-        }
+        } else {
+            DEFAULT_WAIT_TIME
+        };
+
+        debug!("Wait time: {:?}", wait_time);
+        time::Duration::from_secs(wait_time)
     }
 }
 
