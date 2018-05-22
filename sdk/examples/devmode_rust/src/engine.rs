@@ -28,7 +28,7 @@ use sawtooth_sdk::consensus::{engine::*, service::Service};
 const DEFAULT_WAIT_TIME: u64 = 0;
 
 pub struct DevmodeService {
-    pub service: Box<Service>,
+    service: Box<Service>,
 }
 
 impl DevmodeService {
@@ -59,7 +59,9 @@ impl DevmodeService {
         debug!("Getting block {:?}", block_id);
         self.service
             .get_blocks(vec![block_id.clone()])
-            .expect("Failed to get block").get(&block_id).unwrap()
+            .expect("Failed to get block")
+            .get(&block_id)
+            .unwrap()
             .clone()
     }
 
@@ -114,9 +116,11 @@ impl DevmodeService {
     fn cancel_block(&mut self) {
         debug!("Canceling block");
         match self.service.cancel_block() {
-            Ok(_) => {},
-            Err(Error::InvalidState(_)) => {},
-            Err(err) => { panic!("Failed to cancel block: {:?}", err); }
+            Ok(_) => {}
+            Err(Error::InvalidState(_)) => {}
+            Err(err) => {
+                panic!("Failed to cancel block: {:?}", err);
+            }
         };
     }
 
@@ -130,11 +134,10 @@ impl DevmodeService {
             ],
         ) {
             Ok(settings) => {
-                let ints: Vec<u64> = vec!(
+                let ints: Vec<u64> = vec![
                     settings.get("sawtooth.consensus.min_wait_time").unwrap(),
                     settings.get("sawtooth.consensus.max_wait_time").unwrap(),
-                )
-                    .iter()
+                ].iter()
                     .map(|string| string.parse::<u64>())
                     .map(|result| result.unwrap_or(0))
                     .collect();
@@ -181,16 +184,18 @@ impl Engine for DevmodeEngine {
 
         debug!("Entering loop with wait time {:?}", wait_time);;
 
+        // 1. Wait for an incoming message.
+        // 2. Check for exit.
+        // 3. Handle the message.
+        // 4. Check for publishing.
         loop {
-            if !published_at_height && time::Instant::now().duration_since(start) > wait_time {
-                debug!("Timer expired -- publishing block");
-                service.finalize_block();
-                published_at_height = true;
+            let incoming_message = updates.recv_timeout(time::Duration::from_millis(10));
+
+            if self.exit.get() {
+                break;
             }
 
-            // While the new block is getting built, keep validating
-            // incoming new blocks.
-            match updates.recv_timeout(time::Duration::from_millis(10)) {
+            match incoming_message {
                 Ok(update) => {
                     debug!("Received message: {:?}", update);
 
@@ -211,8 +216,10 @@ impl Engine for DevmodeEngine {
                             let block = service.get_block(block_id.clone());
                             chain_head = service.get_chain_head();
 
-                            info!("Choosing between chain heads -- current: {:?} -- new: {:?}",
-                                  chain_head, block);
+                            info!(
+                                "Choosing between chain heads -- current: {:?} -- new: {:?}",
+                                chain_head, block
+                            );
 
                             // Advance the chain if possible.
                             match block.block_num.cmp(&chain_head.block_num) {
@@ -245,7 +252,8 @@ impl Engine for DevmodeEngine {
                         // Devmode doesn't care about peer notifications
                         // or invalid blocks.
                         _ => {}
-                    }},
+                    }
+                }
 
                 Err(RecvTimeoutError::Disconnected) => {
                     println!("disconnected");
@@ -255,8 +263,10 @@ impl Engine for DevmodeEngine {
                 Err(RecvTimeoutError::Timeout) => {}
             }
 
-            if self.exit.get() {
-                break;
+            if !published_at_height && time::Instant::now().duration_since(start) > wait_time {
+                debug!("Timer expired -- publishing block");
+                service.finalize_block();
+                published_at_height = true;
             }
         }
     }
