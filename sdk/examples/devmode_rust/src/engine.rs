@@ -172,7 +172,7 @@ impl DevmodeEngine {
 }
 
 impl Engine for DevmodeEngine {
-    fn start(&self, updates: Receiver<Update>, mut service: Box<Service>) {
+    fn start(&self, updates: Receiver<Update>, service: Box<Service>) {
         let mut service = DevmodeService::new(service);
 
         let mut chain_head = service.wait_for_chain_head();

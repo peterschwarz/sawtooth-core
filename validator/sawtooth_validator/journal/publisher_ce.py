@@ -630,9 +630,24 @@ class BlockPublisher(object):
 
                     self._chain_head = chain_head
 
+                    # If we were building a block, restart
+                    previous_block = None
+                    if self._building():
+                        previous_id = self._candidate_block.previous_block_id
+                        try:
+                            previous_block = self._block_cache[previous_id]
+                        except KeyError:
+                            LOGGER.exception(
+                                "Failed to restart building block with "
+                                "previous id %s", previous_id)
+                        self.cancel_block()
+
                     self._pending_batches.update_limit(len(chain_head.batches))
                     self._pending_batches.rebuild(
                         committed_batches, uncommitted_batches)
+
+                    if previous_block is not None:
+                        self.initialize_block(previous_block)
 
         # pylint: disable=broad-except
         except Exception:
