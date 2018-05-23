@@ -43,6 +43,7 @@ pub enum ErrorCode {
     NullPointerProvided = 0x01,
     InvalidDataDir = 0x02,
     InvalidPythonObject = 0x03,
+    InvalidBlockId = 0x04,
 }
 
 #[no_mangle]
@@ -86,21 +87,15 @@ pub extern "C" fn chain_controller_new(
         }
     };
 
-    println!("Acquiring GIL...");
     let py = unsafe { Python::assume_gil_acquired() };
 
-    println!("Borrowing Block Store...");
-    let py_block_store = unsafe { PyObject::from_borrowed_ptr(py, block_store) };
-    println!("Borrowing Block Cache...");
+    let py_block_store_reader = unsafe { PyObject::from_borrowed_ptr(py, block_store) };
+    let py_block_store_writer = unsafe { PyObject::from_borrowed_ptr(py, block_store) };
     let py_block_cache = unsafe { PyObject::from_borrowed_ptr(py, block_cache) };
-    println!("Borrowing Block Validator...");
     let py_block_validator = unsafe { PyObject::from_borrowed_ptr(py, block_validator) };
-    println!("Borrowing on_chain_updated...");
     let py_on_chain_updated = unsafe { PyObject::from_borrowed_ptr(py, on_chain_updated) };
-    println!("Borrowing observers...");
     let py_observers = unsafe { PyObject::from_borrowed_ptr(py, observers) };
 
-    println!("converting to wrappers");
     let observer_wrappers = if let Ok(py_list) = py_observers.extract::<PyList>(py) {
         let mut res: Vec<Box<ChainObserver>> = Vec::with_capacity(py_list.len(py));
         py_list
@@ -111,11 +106,11 @@ pub extern "C" fn chain_controller_new(
         return ErrorCode::InvalidPythonObject;
     };
 
-    println!("Creating ChainController...");
     let chain_controller = ChainController::new(
         PyBlockCache::new(py_block_cache),
         PyBlockValidator::new(py_block_validator),
-        PyChainWriter::new(py_block_store),
+        PyBlockStore::new(py_block_store_writer),
+        Box::new(PyBlockStore::new(py_block_store_reader)),
         data_dir.into(),
         Box::new(PyChainHeadUpdateObserver::new(py_on_chain_updated)),
         observer_wrappers,
@@ -125,7 +120,6 @@ pub extern "C" fn chain_controller_new(
         *chain_controller_ptr = Box::into_raw(Box::new(chain_controller)) as *const c_void;
     }
 
-    println!("Returning!");
     ErrorCode::Success
 }
 
@@ -136,6 +130,118 @@ pub extern "C" fn chain_controller_drop(chain_controller: *mut c_void) -> ErrorC
     }
 
     unsafe { Box::from_raw(chain_controller) };
+    ErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn chain_controller_start(chain_controller: *mut c_void) -> ErrorCode {
+    if chain_controller.is_null() {
+        return ErrorCode::NullPointerProvided;
+    }
+
+    unsafe {
+        (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
+            .start();
+    }
+    ErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn chain_controller_stop(chain_controller: *mut c_void) -> ErrorCode {
+    if chain_controller.is_null() {
+        return ErrorCode::NullPointerProvided;
+    }
+
+    unsafe {
+        (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
+            .stop();
+    }
+    ErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn chain_controller_has_block(
+    chain_controller: *mut c_void,
+    block_id: *const c_char,
+    result: *mut bool,
+) -> ErrorCode {
+    if chain_controller.is_null() {
+        return ErrorCode::NullPointerProvided;
+    }
+
+    let block_id = unsafe {
+        if block_id.is_null() {
+            return ErrorCode::NullPointerProvided;
+        }
+        match CStr::from_ptr(block_id).to_str() {
+            Ok(s) => s,
+            Err(_) => return ErrorCode::InvalidBlockId,
+        }
+    };
+
+    unsafe {
+        *result = (*(chain_controller
+            as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
+            .has_block(block_id);
+    }
+
+    ErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn chain_controller_queue_block(
+    chain_controller: *mut c_void,
+    block: *mut py_ffi::PyObject,
+) -> ErrorCode {
+    if chain_controller.is_null() {
+        return ErrorCode::NullPointerProvided;
+    }
+
+    let gil_guard = Python::acquire_gil();
+    let py = gil_guard.python();
+
+    let block = unsafe {
+        if block.is_null() {
+            return ErrorCode::NullPointerProvided;
+        }
+        match PyObject::from_borrowed_ptr(py, block).extract(py) {
+            Ok(val) => val,
+            Err(py_err) => {
+                py_err.print(py);
+                return ErrorCode::InvalidPythonObject;
+            }
+        }
+    };
+    unsafe {
+        println!("Queuing {}", block);
+
+        let controller = (*(chain_controller
+            as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
+            .light_clone();
+
+        py.allow_threads(move || {
+            controller.queue_block(block);
+        });
+    }
+
+    ErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn chain_controller_chain_head(
+    chain_controller: *mut c_void,
+    block: *mut *const py_ffi::PyObject,
+) -> ErrorCode {
+    unsafe {
+        let chain_head = (*(chain_controller
+            as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
+            .chain_head();
+
+        let gil_guard = Python::acquire_gil();
+        let py = gil_guard.python();
+
+        *block = chain_head.to_py_object(py).steal_ptr();
+    }
     ErrorCode::Success
 }
 
@@ -279,17 +385,17 @@ impl BlockValidator for PyBlockValidator {
     }
 }
 
-struct PyChainWriter {
+struct PyBlockStore {
     py_block_store: PyObject,
 }
 
-impl PyChainWriter {
+impl PyBlockStore {
     fn new(py_block_store: PyObject) -> Self {
-        PyChainWriter { py_block_store }
+        PyBlockStore { py_block_store }
     }
 }
 
-impl ChainWriter for PyChainWriter {
+impl ChainWriter for PyBlockStore {
     fn update_chain(
         &mut self,
         new_chain: &[Block],
@@ -306,6 +412,21 @@ impl ChainWriter for PyChainWriter {
                 ChainControllerError::ChainUpdateError(
                     "An error occurred while executing update_chain".into(),
                 )
+            })
+    }
+}
+
+impl ChainReader for PyBlockStore {
+    fn chain_head(&self) -> Result<Option<Block>, ChainReadError> {
+        let gil_guard = Python::acquire_gil();
+        let py = gil_guard.python();
+
+        self.py_block_store
+            .getattr(py, "chain_head")
+            .and_then(|result| result.extract(py))
+            .map_err(|py_err| {
+                py_err.print(py);
+                ChainReadError::GeneralReadError("Unable to read from python block store".into())
             })
     }
 }
@@ -536,7 +657,7 @@ impl<'source> FromPyObject<'source> for BlockValidationResult {
         Ok(BlockValidationResult {
             chain_head: obj.getattr(py, "chain_head")?.extract(py)?,
             block: obj.getattr(py, "block")?.extract(py)?,
-            execution_results: vec![],// obj.getattr(py, "execution_results")?.extract(py)?,
+            execution_results: vec![], // obj.getattr(py, "execution_results")?.extract(py)?,
             new_chain: obj.getattr(py, "new_chain")?.extract(py)?,
             current_chain: obj.getattr(py, "current_chain")?.extract(py)?,
 

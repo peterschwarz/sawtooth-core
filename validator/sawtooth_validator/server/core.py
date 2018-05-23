@@ -29,6 +29,7 @@ from sawtooth_validator.database.native_lmdb import NativeLmdbDatabase
 from sawtooth_validator.journal.block_validator import BlockValidator
 from sawtooth_validator.journal.publisher import BlockPublisher
 from sawtooth_validator.journal.chain import ChainController
+from sawtooth_validator.journal.chain2 import NativeChainController
 from sawtooth_validator.journal.genesis import GenesisController
 from sawtooth_validator.journal.batch_sender import BroadcastBatchSender
 from sawtooth_validator.journal.block_sender import BroadcastBlockSender
@@ -293,16 +294,13 @@ class Validator(object):
             config_dir=config_dir,
             permission_verifier=permission_verifier)
 
-        chain_controller = ChainController(
-            block_cache=block_cache,
-            block_validator=block_validator,
-            state_view_factory=state_view_factory,
-            chain_head_lock=block_publisher.chain_head_lock,
-            on_chain_updated=block_publisher.on_chain_updated,
-            chain_id_manager=chain_id_manager,
-            data_dir=data_dir,
-            config_dir=config_dir,
-            chain_observers=[
+        chain_controller = NativeChainController(
+            block_store,
+            block_cache,
+            block_validator,
+            block_publisher.on_chain_updated,
+            data_dir,
+            observers=[
                 event_broadcaster,
                 receipt_store,
                 batch_tracker,

@@ -28,7 +28,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::RecvError;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::channel;
 use std::thread;
+use std::time::Duration;
 
 use batch::Batch;
 use block::Block;
@@ -89,6 +92,15 @@ pub trait BlockCache: Send + Sync {
     fn put(&mut self, block: Block);
 
     fn get(&self, block_id: &str) -> Option<Block>;
+}
+
+#[derive(Debug)]
+pub enum ChainReadError {
+    GeneralReadError(String),
+}
+
+pub trait ChainReader: Send + Sync {
+    fn chain_head(&self) -> Result<Option<Block>, ChainReadError>;
 }
 
 #[derive(Debug)]
@@ -154,6 +166,7 @@ struct ChainControllerState<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>
 pub struct ChainController<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> {
     state: Arc<RwLock<ChainControllerState<BC, BV, CW>>>,
     stop_handle: Arc<Mutex<Option<ChainThreadStopHandle>>>,
+    block_queue_sender: Option<Sender<Block>>,
 }
 
 impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + 'static>
@@ -163,10 +176,22 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         block_cache: BC,
         block_validator: BV,
         chain_writer: CW,
+        chain_reader: Box<ChainReader>,
         data_dir: String,
         chain_head_update_observer: Box<ChainHeadUpdateObserver>,
         observers: Vec<Box<ChainObserver>>,
     ) -> Self {
+        let chain_head = chain_reader
+            .chain_head()
+            .expect("Invalid block store. Head of the block chain cannot be determined");
+
+        if chain_head.is_some() {
+            info!(
+                "Chain controller initialized with chain head: {}",
+                chain_head.as_ref().unwrap()
+            );
+        }
+
         ChainController {
             state: Arc::new(RwLock::new(ChainControllerState {
                 block_cache,
@@ -175,10 +200,19 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 chain_id_manager: ChainIdManager::new(data_dir),
                 chain_head_update_observer,
                 observers,
-                chain_head: None,
+                chain_head,
             })),
             stop_handle: Arc::new(Mutex::new(None)),
+            block_queue_sender: None,
         }
+    }
+
+    pub fn chain_head(&self) -> Option<Block> {
+        let mut state = self.state
+            .write()
+            .expect("No lock holder should have poisoned the lock");
+
+        state.chain_head.clone()
     }
 
     pub fn on_block_received(&mut self, block: Block) -> Result<(), ChainControllerError> {
@@ -285,36 +319,51 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         }
     }
 
+    pub fn light_clone(&self) -> Self {
+        ChainController {
+            state: self.state.clone(),
+            // This instance doesn't share the stop handle: it's not a
+            // publicly accessible instance
+            stop_handle: Arc::new(Mutex::new(None)),
+            block_queue_sender: self.block_queue_sender.clone(),
+        }
+    }
+
     fn submit_blocks_for_verification(
         &self,
         block_validator: &BV,
         blocks: &[Block],
     ) -> Result<(), ChainControllerError> {
-        let mut chain_controller_copy = ChainController {
-            state: self.state.clone(),
-            // This instance doesn't share the stop handle: it's not a
-            // publicly accessible instance
-            stop_handle: Arc::new(Mutex::new(None)),
-        };
-
+        let mut chain_controller_copy = self.light_clone();
         block_validator.submit_blocks_for_verification(blocks, move |commit_new_block, result| {
             chain_controller_copy.on_block_validated(commit_new_block, result)
         });
         Ok(())
     }
 
-    fn start(&self, block_queue: Receiver<Block>) {
+    pub fn queue_block(&self, block: Block) {
+        if self.block_queue_sender.is_some() {
+            let sender = self.block_queue_sender.clone();
+            thread::spawn(move || {
+                if let Err(err) = sender.as_ref().unwrap().send(block) {
+                    error!("Unable to add block to block queue: {}", err);
+                }
+            });
+        }
+    }
+
+    pub fn start(&mut self) {
         let mut stop_handle = self.stop_handle.lock().unwrap();
         if stop_handle.is_none() {
-            let mut thread_chain_controller = ChainController {
-                state: self.state.clone(),
-                // This instance doesn't share the stop handle: it's not a
-                // publicly accessible instance
-                stop_handle: Arc::new(Mutex::new(None)),
-            };
+            let (block_queue_sender, block_queue_receiver) = channel();
+            self.block_queue_sender = Some(block_queue_sender);
+            let thread_chain_controller = self.light_clone();
             let exit_flag = Arc::new(AtomicBool::new(false));
-            let mut chain_thread =
-                ChainThread::new(thread_chain_controller, block_queue, exit_flag.clone());
+            let mut chain_thread = ChainThread::new(
+                thread_chain_controller,
+                block_queue_receiver,
+                exit_flag.clone(),
+            );
             *stop_handle = Some(ChainThreadStopHandle::new(exit_flag));
             thread::spawn(move || {
                 if let Err(err) = chain_thread.run() {
@@ -324,7 +373,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         }
     }
 
-    fn stop(&mut self) {
+    pub fn stop(&mut self) {
         let mut stop_handle = self.stop_handle.lock().unwrap();
         if stop_handle.is_some() {
             let handle: ChainThreadStopHandle = stop_handle.take().unwrap();
@@ -421,10 +470,15 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
 
     fn run(&mut self) -> Result<(), ChainControllerError> {
         loop {
-            let block = self.block_queue.recv()?;
+            let block = match self.block_queue.recv_timeout(Duration::from_secs(1)) {
+                Err(_) => continue,
+                Ok(block) => block,
+            };
+            println!("Pulled {} from queue", block);
             self.chain_controller.on_block_received(block)?;
 
             if self.exit.load(Ordering::Relaxed) {
+                println!("Shutting down Chain Thread...");
                 break Ok(());
             }
         }
@@ -444,6 +498,7 @@ impl ChainThreadStopHandle {
 
 impl StopHandle for ChainThreadStopHandle {
     fn stop(&self) {
+        println!("Stopping chain thread");
         self.exit.store(true, Ordering::Relaxed)
     }
 }
