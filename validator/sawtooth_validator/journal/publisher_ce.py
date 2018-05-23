@@ -680,12 +680,21 @@ class BlockPublisher(object):
 
             result = self._candidate_block.finalize(consensus, force)
 
-            self._candidate_block = None
-
             # Update the _pending_batches to reflect what we learned.
             self._pending_batches.update(
                 result.remaining_batches,
                 result.last_batch)
+
+            # If finalizing failed restart
+            if result.block is None:
+                previous_block =\
+                    self._block_cache[self._candidate_block.previous_block_id]
+                self._candidate_block = None
+
+                self.initialize_block(previous_block)
+                raise BlockEmpty()
+
+            self._candidate_block = None
 
             return result
 
