@@ -447,7 +447,7 @@ class ChainController(object):
                 != chain_head.identifier:
             self._moved_to_fork_count.inc()
 
-        LOGGER.info("Finished buildig fork result for: %s", block)
+        LOGGER.info("Finished building fork result for: %s", block)
         return result
 
     @staticmethod

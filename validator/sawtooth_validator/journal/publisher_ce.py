@@ -370,11 +370,11 @@ class _CandidateBlock(object):
                 # to add it to the batch.
                 if not self._check_batch_dependencies(batch,
                                                       committed_txn_cache):
-                    LOGGER.debug("Batch %s invalid, due to missing txn "
-                                 "dependency.", batch.header_signature)
-                    LOGGER.debug("Abandoning block %s:"
-                                 "root state hash has invalid txn applied",
-                                 builder)
+                    LOGGER.warning("Batch %s invalid, due to missing txn "
+                                   "dependency.", batch.header_signature)
+                    LOGGER.warning("Abandoning block %s:"
+                                   "root state hash has invalid txn applied",
+                                   builder)
                     # Update the pending batch list to be all the
                     # batches that passed validation to this point and
                     # none of the ones that failed. It is possible that
@@ -400,7 +400,7 @@ class _CandidateBlock(object):
                              batch.header_signature)
 
         if state_hash is None or not builder.batches:
-            LOGGER.debug("Abandoning block %s: no batches added", builder)
+            LOGGER.warning("Abandoning block %s: no batches added", builder)
             return self._build_result(None, pending_batches)
 
         builder.block_header.consensus = consensus
@@ -680,12 +680,21 @@ class BlockPublisher(object):
 
             result = self._candidate_block.finalize(consensus, force)
 
-            self._candidate_block = None
-
             # Update the _pending_batches to reflect what we learned.
             self._pending_batches.update(
                 result.remaining_batches,
                 result.last_batch)
+
+            # If finalizing failed restart
+            if result.block is None:
+                previous_block =\
+                    self._block_cache[self._candidate_block.previous_block_id]
+                self._candidate_block = None
+
+                self.initialize_block(previous_block)
+                raise BlockEmpty()
+
+            self._candidate_block = None
 
             return result
 
