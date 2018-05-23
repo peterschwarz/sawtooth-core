@@ -42,6 +42,10 @@ BLOCK_TO_REACH = 55
 # this block. These are different because PoET occassionally forks.
 BLOCK_TO_CHECK_CONSENSUS = 50
 
+# When getting blocks from all nodes, if the heights are greater than this far
+# apart, fail the test
+SYNC_TOLERANCE = 10
+
 
 class TestDevmodeEngine(unittest.TestCase):
     def test_devmode_engine(self):
@@ -50,6 +54,7 @@ class TestDevmodeEngine(unittest.TestCase):
         # Wait until all nodes have reached the minimum block number
         nodes_reached = set()
         while len(nodes_reached) < NODES:
+            heights = []
             for i in range(0, NODES):
                 block = get_block(i)
                 if block is not None:
@@ -57,10 +62,14 @@ class TestDevmodeEngine(unittest.TestCase):
                     # Ensure all blocks have an acceptable number of batches
                     self.assertTrue(check_block_batch_count(
                         block, BATCHES_PER_BLOCK_RANGE))
-                    if int(block["header"]["block_num"]) >= BLOCK_TO_REACH:
+                    height = int(block["header"]["block_num"])
+                    heights.append(height)
+                    if height >= BLOCK_TO_REACH:
                         nodes_reached.add(i)
 
                     log_block(i, block)
+
+            self.assertTrue(check_tolerance(heights))
 
             time.sleep(3)
 
@@ -144,3 +153,10 @@ def check_consensus(chains, block_num):
             LOGGER.error("BLOCK DUMP: %s", blocks)
             return False
     return True
+
+
+def check_tolerance(heights):
+    if heights:
+        return (max(heights) - min(heights)) <= SYNC_TOLERANCE
+    else:
+        return True
