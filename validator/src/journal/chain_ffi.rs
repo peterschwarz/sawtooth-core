@@ -27,6 +27,9 @@ use batch::Batch;
 use block::Block;
 use transaction::Transaction;
 
+use scheduler::TxnExecutionResult;
+use scheduler::TransactionResult;
+
 use protobuf;
 use protobuf::Message;
 
@@ -693,7 +696,7 @@ impl<'source> FromPyObject<'source> for BlockValidationResult {
         Ok(BlockValidationResult {
             chain_head: obj.getattr(py, "chain_head")?.extract(py)?,
             block: obj.getattr(py, "block")?.extract(py)?,
-            execution_results: vec![], // obj.getattr(py, "execution_results")?.extract(py)?,
+            execution_results: obj.getattr(py, "execution_results")?.extract(py)?,
             new_chain: obj.getattr(py, "new_chain")?.extract(py)?,
             current_chain: obj.getattr(py, "current_chain")?.extract(py)?,
 

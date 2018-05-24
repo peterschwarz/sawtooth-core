@@ -33,11 +33,14 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
+use protobuf;
+
 use batch::Batch;
 use block::Block;
 use journal;
 
 use proto::transaction_receipt::TransactionReceipt;
+use scheduler::TxnExecutionResult;
 
 #[derive(Debug)]
 pub enum ChainControllerError {
@@ -123,25 +126,13 @@ pub struct BlockValidationResult {
     pub chain_head: Block,
     pub block: Block,
 
-    pub execution_results: Vec<TransactionResult>,
+    pub execution_results: Vec<TxnExecutionResult>,
 
     pub new_chain: Vec<Block>,
     pub current_chain: Vec<Block>,
 
     pub committed_batches: Vec<Batch>,
     pub uncommitted_batches: Vec<Batch>,
-}
-
-// This should be in a validation Module
-pub struct TransactionResult {
-    // pub signature: String,
-    // pub is_valid: bool,
-    // pub state_hash: String,
-    // pub state_changes: Vec<StateChange>,
-    // pub events: Vec<Event>,
-    // pub data: Vec<(String, Vec<u8>)>,
-    // pub error_message: String,
-    // pub error_data: Vec<u8>,
 }
 
 pub trait ChainWriter: Send + Sync {
@@ -439,8 +430,25 @@ fn notify_on_chain_updated<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
     );
 }
 
-fn make_receipts(result: &[TransactionResult]) -> Vec<TransactionReceipt> {
-    unimplemented!()
+fn make_receipts(results: &[TxnExecutionResult]) -> Vec<TransactionReceipt> {
+    results.iter().map(TransactionReceipt::from).collect()
+}
+
+impl<'a> From<&'a TxnExecutionResult> for TransactionReceipt {
+    fn from(result: &'a TxnExecutionResult) -> Self {
+        let mut receipt = TransactionReceipt::new();
+
+        receipt.set_data(protobuf::RepeatedField::from_vec(
+            result.data.iter().map(|(_, data)| data.clone()).collect(),
+        ));
+        receipt.set_state_changes(protobuf::RepeatedField::from_vec(
+            result.state_changes.clone(),
+        ));
+        receipt.set_events(protobuf::RepeatedField::from_vec(result.events.clone()));
+        receipt.set_transaction_id(result.signature.clone());
+
+        receipt
+    }
 }
 
 struct ChainThread<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> {
