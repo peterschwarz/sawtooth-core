@@ -149,7 +149,13 @@ pub trait Engine: Sync + Send {
     /// Called after the engine is initialized, when a connection to the validator has been
     /// established. Notifications from the validator are sent along `updates`. `service` is used
     /// to send requests to the validator.
-    fn start(&self, updates: Receiver<Update>, service: Box<Service>);
+    fn start(
+        &self,
+        updates: Receiver<Update>,
+        service: Box<Service>,
+        chain_head: Block,
+        peers: Vec<PeerInfo>,
+    );
 
     /// Called before the engine is dropped, to give the engine a chance to notify peers and
     /// cleanup
