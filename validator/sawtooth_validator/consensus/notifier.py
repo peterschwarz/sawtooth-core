@@ -13,6 +13,7 @@
 # limitations under the License.
 # ------------------------------------------------------------------------------
 
+import hashlib
 import logging
 
 from sawtooth_validator.protobuf import consensus_pb2
@@ -58,6 +59,9 @@ class ConsensusNotifier:
 
     def notify_block_new(self, block):
         """A new block was received and passed initial consensus validation"""
+        summary = hashlib.sha256()
+        for batch in block.batches:
+            summary.update(batch.header_signature.encode())
         self._notify(
             validator_pb2.Message.CONSENSUS_NOTIFY_BLOCK_NEW,
             consensus_pb2.ConsensusNotifyBlockNew(
@@ -66,7 +70,8 @@ class ConsensusNotifier:
                     previous_id=bytes.fromhex(block.previous_block_id),
                     signer_id=bytes.fromhex(block.header.signer_public_key),
                     block_num=block.block_num,
-                    payload=block.consensus)))
+                    payload=block.consensus,
+                    summary=summary.digest())))
 
     def notify_block_valid(self, block_id):
         """This block can be committed successfully"""
