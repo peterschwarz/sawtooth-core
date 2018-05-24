@@ -115,7 +115,7 @@ pub trait BlockValidator: Send + Sync {
 
     fn submit_blocks_for_verification<F>(&self, blocks: &[Block], on_block_validated: F)
     where
-        F: FnOnce(bool, BlockValidationResult);
+        F: FnMut(bool, BlockValidationResult);
 }
 
 // This should be in a validation module

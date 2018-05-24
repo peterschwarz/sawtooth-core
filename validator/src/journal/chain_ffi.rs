@@ -15,10 +15,12 @@
  * ------------------------------------------------------------------------------
  */
 use cpython;
-use cpython::{FromPyObject, ObjectProtocol, PyList, PyObject, Python, PythonObject, ToPyObject};
+use cpython::{FromPyObject, ObjectProtocol, PyDict, PyList, PyObject, PyResult, Python,
+              PythonObject, ToPyObject};
 use journal::chain::*;
 use py_ffi;
 use std::ffi::CStr;
+use std::mem::transmute;
 use std::os::raw::{c_char, c_void};
 
 use batch::Batch;
@@ -354,25 +356,39 @@ impl BlockValidator for PyBlockValidator {
 
     fn submit_blocks_for_verification<F>(&self, blocks: &[Block], on_block_validated: F)
     where
-        F: FnOnce(bool, BlockValidationResult),
+        F: FnMut(bool, BlockValidationResult),
     {
-        /*
         let gil_guard = Python::acquire_gil();
         let py = gil_guard.python();
 
-        let callback = |py: Python, can_commit: bool, result: PyObject| {
-            on_block_validated(
-                can_commit,
-                result.extract::<BlockValidationResult>(py).unwrap(),
-            );
-            Ok(0)
-        };
+        let p: *mut FnMut(bool, BlockValidationResult) = Box::into_raw(Box::new(on_block_validated));
+        let callback_ptr: u128 = unsafe { transmute(p) };
+
+        // A bit of a hack, but will need to submit a patch to cpython to support To/FromPyObject
+        // for u128, which is only in stable as of rustc 1.26
+        let ptr_str = format!("{:x}", callback_ptr);
+
+        let dict = PyDict::new(py);
+        dict.set_item(py, "ptr", ptr_str).unwrap();
+        dict.set_item(
+            py,
+            "callback",
+            py_fn!(
+                py,
+                execute_callback(callback_ptr: String, can_commit: bool, result: PyObject)
+            ),
+        ).unwrap();
+        let py_callback = py.eval(
+            "lambda can_commit, result: f(ptr, can_commit, result)",
+            None,
+            Some(&dict),
+        ).unwrap();
 
         self.py_block_validator
             .call_method(
                 py,
                 "submit_blocks_for_verification",
-                (blocks, py_fn!(py, callback(can_commit, result))),
+                (blocks, py_callback),
                 None,
             )
             .map(|_| ())
@@ -381,8 +397,28 @@ impl BlockValidator for PyBlockValidator {
                 ()
             })
             .unwrap_or(())
-            */
     }
+}
+
+fn execute_callback(
+    py: Python,
+    fn_ptr: String,
+    can_commit: bool,
+    result: PyObject,
+) -> PyResult<i32> {
+    let validation_results: BlockValidationResult = result.extract(py).unwrap();
+    let fn_ptr = u128::from_str_radix(&fn_ptr, 16)
+        .expect("String corruption occurred while crossing the rust-python frontier");
+    py.allow_threads(move || {
+        let mut callback = unsafe {
+            Box::from_raw(transmute::<u128, *mut FnMut(bool, BlockValidationResult)>(
+                fn_ptr,
+            ))
+        };
+        callback(can_commit, validation_results);
+    });
+
+    Ok(0)
 }
 
 struct PyBlockStore {
