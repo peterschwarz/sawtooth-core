@@ -171,6 +171,32 @@ class ConsensusInitializeBlockHandler(ConsensusServiceHandler):
                 consensus_pb2.ConsensusInitializeBlockResponse.SERVICE_ERROR
 
 
+class ConsensusSummarizeBlockHandler(ConsensusServiceHandler):
+    def __init__(self, proxy):
+        super().__init__(
+            consensus_pb2.ConsensusSummarizeBlockRequest,
+            validator_pb2.Message.CONSENSUS_SUMMARIZE_BLOCK_REQUEST,
+            consensus_pb2.ConsensusSummarizeBlockResponse,
+            validator_pb2.Message.CONSENSUS_SUMMARIZE_BLOCK_RESPONSE)
+
+        self._proxy = proxy
+
+    def handle_request(self, request, response):
+        try:
+            summary = self._proxy.summarize_block()
+            response.summary = summary
+        except BlockNotInitialized:
+            response.status =\
+                consensus_pb2.ConsensusSummarizeBlockResponse.INVALID_STATE
+        except BlockEmpty:
+            response.status =\
+                consensus_pb2.ConsensusSummarizeBlockResponse.BLOCK_NOT_READY
+        except Exception:  # pylint: disable=broad-except
+            LOGGER.exception("ConsensusSummarizeBlock")
+            response.status =\
+                consensus_pb2.ConsensusSummarizeBlockResponse.SERVICE_ERROR
+
+
 class ConsensusFinalizeBlockHandler(ConsensusServiceHandler):
     def __init__(self, proxy):
         super().__init__(
