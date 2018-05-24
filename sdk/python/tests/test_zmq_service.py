@@ -91,6 +91,22 @@ class TestService(unittest.TestCase):
             content=consensus_pb2.ConsensusInitializeBlockRequest(
                 previous_id=b'test').SerializeToString())
 
+    def test_summarize_block(self):
+        self.mock_stream.send.return_value = self._make_future(
+            message_type=Message.CONSENSUS_SUMMARIZE_BLOCK_RESPONSE,
+            content=consensus_pb2.ConsensusSummarizeBlockResponse(
+                status=consensus_pb2.ConsensusSummarizeBlockResponse.OK,
+                summary=b'summary'))
+
+        result = self.service.summarize_block()
+
+        self.mock_stream.send.assert_called_with(
+            message_type=Message.CONSENSUS_SUMMARIZE_BLOCK_REQUEST,
+            content=consensus_pb2.ConsensusSummarizeBlockRequest()
+                .SerializeToString())
+
+        self.assertEqual(result, b'summary')
+
     def test_finalize_block(self):
         self.mock_stream.send.return_value = self._make_future(
             message_type=Message.CONSENSUS_FINALIZE_BLOCK_RESPONSE,
@@ -121,17 +137,17 @@ class TestService(unittest.TestCase):
             message_type=Message.CONSENSUS_CANCEL_BLOCK_REQUEST,
             content=request.SerializeToString())
 
-    def test_check_block(self):
+    def test_check_blocks(self):
         self.mock_stream.send.return_value = self._make_future(
-            message_type=Message.CONSENSUS_CHECK_BLOCK_RESPONSE,
-            content=consensus_pb2.ConsensusCheckBlockResponse(
-                status=consensus_pb2.ConsensusCheckBlockResponse.OK))
+            message_type=Message.CONSENSUS_CHECK_BLOCKS_RESPONSE,
+            content=consensus_pb2.ConsensusCheckBlocksResponse(
+                status=consensus_pb2.ConsensusCheckBlocksResponse.OK))
 
         self.service.check_blocks(priority=[b'test1', b'test2'])
 
         self.mock_stream.send.assert_called_with(
-            message_type=Message.CONSENSUS_CHECK_BLOCK_REQUEST,
-            content=consensus_pb2.ConsensusCheckBlockRequest(
+            message_type=Message.CONSENSUS_CHECK_BLOCKS_REQUEST,
+            content=consensus_pb2.ConsensusCheckBlocksRequest(
                 block_ids=[b'test1', b'test2']).SerializeToString())
 
     def test_commit_block(self):
