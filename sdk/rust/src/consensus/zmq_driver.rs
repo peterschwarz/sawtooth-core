@@ -927,11 +927,11 @@ mod tests {
 
         service_test!(
             &socket,
-            ConsensusCheckBlockResponse::new(),
-            ConsensusCheckBlockResponse_Status::OK,
-            Message_MessageType::CONSENSUS_CHECK_BLOCK_RESPONSE,
-            ConsensusCheckBlockRequest,
-            Message_MessageType::CONSENSUS_CHECK_BLOCK_REQUEST
+            ConsensusCheckBlocksResponse::new(),
+            ConsensusCheckBlocksResponse_Status::OK,
+            Message_MessageType::CONSENSUS_CHECK_BLOCKS_RESPONSE,
+            ConsensusCheckBlocksRequest,
+            Message_MessageType::CONSENSUS_CHECK_BLOCKS_REQUEST
         );
 
         service_test!(
