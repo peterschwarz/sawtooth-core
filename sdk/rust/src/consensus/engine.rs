@@ -287,7 +287,7 @@ pub mod tests {
     }
 
     impl Engine for MockEngine {
-        fn start(&self, updates: Receiver<Update>, _service: Box<Service>) {
+        fn start(&self, updates: Receiver<Update>, _service: Box<Service>, _chain_head: Block, _peers: Vec<PeerInfo>) {
             (*self.calls.lock().unwrap()).push("start".into());
             loop {
                 match updates.recv_timeout(::std::time::Duration::from_millis(100)) {
@@ -368,7 +368,7 @@ pub mod tests {
             .unwrap();
         let handle = ::std::thread::spawn(move || {
             let svc = Box::new(MockService {});
-            eng_clone.start(receiver, svc);
+            eng_clone.start(receiver, svc, Default::default(), Default::default());
         });
         eng.stop();
         handle.join().unwrap();

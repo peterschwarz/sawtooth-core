@@ -13,7 +13,7 @@ class TestHandlers(unittest.TestCase):
         self.mock_proxy = Mock()
 
     def test_consensus_register_handler(self):
-        handler = handlers.ConsensusRegisterHandler()
+        handler = handlers.ConsensusRegisterHandler(self.mock_proxy)
         request_class = handler.request_class
         request = request_class()
         request.name = "test"
