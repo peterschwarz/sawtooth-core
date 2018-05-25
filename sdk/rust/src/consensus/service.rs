@@ -117,7 +117,7 @@ pub mod tests {
         fn fail_block(&mut self, _block_id: BlockId) -> Result<(), Error> {
             Ok(())
         }
-        fn get_blocks(&mut self, _block_ids: Vec<BlockId>) -> Result<Vec<Block>, Error> {
+        fn get_blocks(&mut self, _block_ids: Vec<BlockId>) -> Result<HashMap<BlockId, Block>, Error> {
             Ok(Default::default())
         }
         fn get_chain_head(&mut self) -> Result<Block, Error> {
@@ -127,14 +127,14 @@ pub mod tests {
             &mut self,
             _block_id: BlockId,
             _settings: Vec<String>,
-        ) -> Result<Vec<String>, Error> {
+        ) -> Result<HashMap<String, String>, Error> {
             Ok(Default::default())
         }
         fn get_state(
             &mut self,
             _block_id: BlockId,
             _addresses: Vec<String>,
-        ) -> Result<Vec<Vec<u8>>, Error> {
+        ) -> Result<HashMap<String, Vec<u8>>, Error> {
             Ok(Default::default())
         }
     }
