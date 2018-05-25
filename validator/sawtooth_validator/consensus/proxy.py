@@ -34,6 +34,14 @@ class ConsensusProxy:
         self._settings_view_factory = settings_view_factory
         self._state_view_factory = state_view_factory
 
+    def register(self):
+        chain_head = self._chain_controller.chain_head
+
+        # not implemented
+        peers = []
+
+        return chain_head, peers
+
     # Using network service
     def send_to(self, peer_id, message):
         raise NotImplementedError()

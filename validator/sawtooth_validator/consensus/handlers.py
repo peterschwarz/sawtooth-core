@@ -92,14 +92,30 @@ class ConsensusServiceHandler(Handler):
 
 
 class ConsensusRegisterHandler(ConsensusServiceHandler):
-    def __init__(self):
+    def __init__(self, proxy):
         super().__init__(
             consensus_pb2.ConsensusRegisterRequest,
             validator_pb2.Message.CONSENSUS_REGISTER_REQUEST,
             consensus_pb2.ConsensusRegisterResponse,
             validator_pb2.Message.CONSENSUS_REGISTER_RESPONSE)
 
+        self._proxy = proxy
+
     def handle_request(self, request, response):
+        chain_head, peers = self._proxy.register()
+
+        if chain_head is None:
+            response.status = consensus_pb2.ConsensusRegisterResponse.NOT_READY
+            return
+
+        response.chain_head.block_id=bytes.fromhex(chain_head.identifier)
+        response.chain_head.previous_id=bytes.fromhex(chain_head.previous_block_id)
+        response.chain_head.signer_id=bytes.fromhex(chain_head.header_signature)
+        response.chain_head.block_num=chain_head.block_num
+        response.chain_head.payload=chain_head.consensus
+
+        response.peers.extend(peers)
+
         LOGGER.info(
             "Consensus engine registered: %s %s",
             request.name,
