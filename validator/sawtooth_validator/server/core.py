@@ -371,21 +371,25 @@ class Validator(object):
             self._start()
 
     def _start(self):
-        self._network_dispatcher.start()
-        self._network_service.start()
+        try:
+            self._network_dispatcher.start()
+            self._network_service.start()
 
-        self._gossip.start()
-        self._block_publisher.start()
-        self._chain_controller.start()
+            self._gossip.start()
+            self._block_publisher.start()
+            self._chain_controller.start()
+            print('chain_controller started')
 
-        signal_event = threading.Event()
+            signal_event = threading.Event()
 
-        signal.signal(signal.SIGTERM,
-                      lambda sig, fr: signal_event.set())
-        # This is where the main thread will be during the bulk of the
-        # validator's life.
-        while not signal_event.is_set():
-            signal_event.wait(timeout=20)
+            signal.signal(signal.SIGTERM,
+                          lambda sig, fr: signal_event.set())
+            # This is where the main thread will be during the bulk of the
+            # validator's life.
+            while not signal_event.is_set():
+                signal_event.wait(timeout=20)
+        except e:
+            LOGGER.exception(e)
 
     def stop(self):
         self._gossip.stop()

@@ -147,10 +147,19 @@ struct ChainControllerState<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>
     block_cache: BC,
     block_validator: BV,
     chain_writer: CW,
+    chain_reader: Box<ChainReader>,
     chain_head: Option<Block>,
     chain_id_manager: ChainIdManager,
     chain_head_update_observer: Box<ChainHeadUpdateObserver>,
     observers: Vec<Box<ChainObserver>>,
+}
+
+impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> Drop
+    for ChainControllerState<BC, BV, CW>
+{
+    fn drop(&mut self) {
+        println!("Dropping ChainControllerState");
+    }
 }
 
 #[derive(Clone)]
@@ -158,6 +167,12 @@ pub struct ChainController<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> 
     state: Arc<RwLock<ChainControllerState<BC, BV, CW>>>,
     stop_handle: Arc<Mutex<Option<ChainThreadStopHandle>>>,
     block_queue_sender: Option<Sender<Block>>,
+}
+
+impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> Drop for ChainController<BC, BV, CW> {
+    fn drop(&mut self) {
+        println!("Dropping ChainController");
+    }
 }
 
 impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + 'static>
@@ -172,26 +187,16 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         chain_head_update_observer: Box<ChainHeadUpdateObserver>,
         observers: Vec<Box<ChainObserver>>,
     ) -> Self {
-        let chain_head = chain_reader
-            .chain_head()
-            .expect("Invalid block store. Head of the block chain cannot be determined");
-
-        if chain_head.is_some() {
-            info!(
-                "Chain controller initialized with chain head: {}",
-                chain_head.as_ref().unwrap()
-            );
-        }
-
         ChainController {
             state: Arc::new(RwLock::new(ChainControllerState {
                 block_cache,
                 block_validator,
                 chain_writer,
+                chain_reader,
                 chain_id_manager: ChainIdManager::new(data_dir),
                 chain_head_update_observer,
                 observers,
-                chain_head,
+                chain_head: None,
             })),
             stop_handle: Arc::new(Mutex::new(None)),
             block_queue_sender: None,
@@ -199,18 +204,20 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
     }
 
     pub fn chain_head(&self) -> Option<Block> {
-        let mut state = self.state
-            .write()
+        let state = self.state
+            .read()
             .expect("No lock holder should have poisoned the lock");
 
         state.chain_head.clone()
     }
 
     pub fn on_block_received(&mut self, block: Block) -> Result<(), ChainControllerError> {
+        println!("{}({}): block {}", file!(), line!(), block);
         let mut state = self.state
             .write()
             .expect("No lock holder should have poisoned the lock");
 
+        println!("{}({}): acquired lock", file!(), line!());
         if has_block_no_lock(&state, &block.header_signature) {
             return Ok(());
         }
@@ -227,6 +234,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
 
         state.block_cache.put(block.clone());
         self.submit_blocks_for_verification(&state.block_validator, &[block])?;
+        println!("{}({}): on_block_received done", file!(), line!());
         Ok(())
     }
 
@@ -255,7 +263,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 state.chain_head.as_ref().unwrap(),
                 new_block
             );
-            debug!("Verify block again: {}", new_block);
+            println!("Verify block again: {}", new_block);
             if let Err(err) =
                 self.submit_blocks_for_verification(&state.block_validator, &[new_block])
             {
@@ -288,7 +296,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
             state.chain_head.as_ref().map(|block| {
                 block.batches.iter().for_each(|batch| {
                     if batch.trace {
-                        debug!(
+                        println!(
                             "TRACE: {}: ChainController.on_block_validated",
                             batch.header_signature
                         )
@@ -310,6 +318,8 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         }
     }
 
+    /// Light clone makes a copy of this controller, without access to the stop
+    /// handle.
     pub fn light_clone(&self) -> Self {
         ChainController {
             state: self.state.clone(),
@@ -325,6 +335,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         block_validator: &BV,
         blocks: &[Block],
     ) -> Result<(), ChainControllerError> {
+        println!("submitting {:?} for verification", blocks);
         let mut chain_controller_copy = self.light_clone();
         block_validator.submit_blocks_for_verification(blocks, move |commit_new_block, result| {
             chain_controller_copy.on_block_validated(commit_new_block, result)
@@ -334,8 +345,10 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
 
     pub fn queue_block(&self, block: Block) {
         if self.block_queue_sender.is_some() {
+            println!("Before thread: Queuing block {} for validation", block);
             let sender = self.block_queue_sender.clone();
             thread::spawn(move || {
+                println!("In thread: Queuing block {} for validation", block);
                 if let Err(err) = sender.as_ref().unwrap().send(block) {
                     error!("Unable to add block to block queue: {}", err);
                 }
@@ -346,6 +359,32 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
     pub fn start(&mut self) {
         let mut stop_handle = self.stop_handle.lock().unwrap();
         if stop_handle.is_none() {
+            println!("{}({}): Starting chain controller", file!(), line!());
+
+            {
+                // we need to check to see if a genesis block was created and stored,
+                // before this controller was started
+                let mut state = self.state
+                    .write()
+                    .expect("No lock holder should have poisoned the lock");
+
+                let chain_head = state
+                    .chain_reader
+                    .chain_head()
+                    .expect("Invalid block store. Head of the block chain cannot be determined");
+
+                if chain_head.is_some() {
+                    println!(
+                        //info!(
+                        "Chain controller initialized with chain head: {}",
+                        chain_head.as_ref().unwrap()
+                    );
+                    state.chain_head = chain_head;
+                }
+            }
+
+            println!("{}({}): Finished loading chain head", file!(), line!());
+
             let (block_queue_sender, block_queue_receiver) = channel();
             self.block_queue_sender = Some(block_queue_sender);
             let thread_chain_controller = self.light_clone();
@@ -356,8 +395,11 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 exit_flag.clone(),
             );
             *stop_handle = Some(ChainThreadStopHandle::new(exit_flag));
+            println!("{}({}): Spawning chain thread", file!(), line!());
             thread::spawn(move || {
+                println!("{}({}): chain thread started", file!(), line!());
                 if let Err(err) = chain_thread.run() {
+                    println!("Error occurred during ChainController loop: {:?}", err);
                     error!("Error occurred during ChainController loop: {:?}", err);
                 }
             });
@@ -400,6 +442,7 @@ fn set_genesis<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
                 block.header_signature
             );
         } else {
+            println!("Validating {} as Genesis block", block);
             state.block_validator.validate_block(block.clone())?;
 
             if chain_id.is_none() {
@@ -455,6 +498,12 @@ struct ChainThread<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> {
     chain_controller: ChainController<BC, BV, CW>,
     block_queue: Receiver<Block>,
     exit: Arc<AtomicBool>,
+}
+
+impl<BC: BlockCache, BV: BlockValidator, CW: ChainWriter> Drop for ChainThread<BC, BV, CW> {
+    fn drop(&mut self) {
+        println!("Dropping ChainThread");
+    }
 }
 
 trait StopHandle: Clone {
@@ -524,7 +573,7 @@ impl ChainIdManager {
     }
 
     pub fn save_block_chain_id(&self, block_chain_id: &str) -> Result<(), io::Error> {
-        debug!("Writing block chain id");
+        println!("Writing block chain id");
 
         let mut path = PathBuf::new();
         path.push(&self.data_dir);

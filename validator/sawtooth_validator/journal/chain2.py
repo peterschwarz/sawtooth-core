@@ -36,7 +36,7 @@ class NativeChainController(OwnedPointer):
         if observers is None:
             observers = []
 
-        res = PY_LIBRARY.call(
+        _pylibexec(
             'chain_controller_new',
             ctypes.py_object(block_store),
             ctypes.py_object(block_cache),
@@ -45,19 +45,14 @@ class NativeChainController(OwnedPointer):
             ctypes.py_object(observers),
             ctypes.c_char_p(data_dir.encode()),
             ctypes.byref(self.pointer))
-        if res == ErrorCode.Success:
-            print("Success")
-            return
-        elif res == ErrorCode.NullPointerProvided:
-            raise TypeError("Provided null pointer(s)")
-        elif res == ErrorCode.InvalidDataDir:
-            raise TypeError("Invalid data dir {}".format(data_dir))
-        elif res == ErrorCode.InvalidPythonObject:
-            print("InvalidPythonObject")
-            raise TypeError("Invalid python object submitted")
-        else:
-            print("Unknown Error Occurred")
-            raise TypeError("Unknown error occurred: {}".format(res.error))
+
+    def start(self):
+        _libexec('chain_controller_start', self.pointer)
+        print('started')
+
+    def stop(self):
+        _libexec('chain_controller_stop', self.pointer)
+        print('stopped')
 
     def has_block(self, block_id):
         result = ctypes.c_bool()
@@ -65,26 +60,24 @@ class NativeChainController(OwnedPointer):
         _libexec('chain_controller_has_block',
                  self.pointer, ctypes.c_char_p(block_id.encode()),
                  ctypes.byref(result))
+        print("has_block: {}".format(result.value))
         return result.value
 
     def queue_block(self, block):
         _pylibexec('chain_controller_queue_block', self.pointer,
                    ctypes.py_object(block))
-
-    def start(self):
-        _libexec('chain_controller_start', self.pointer)
-    
-    def stop(self):
-        _libexec('chain_controller_stop', self.pointer)
+        print('queued')
 
     @property
     def chain_head(self):
+        print("getting chain_head")
         result = ctypes.py_object()
 
         _pylibexec('chain_controller_chain_head',
                  self.pointer,
                  ctypes.byref(result))
 
+        print("get chain_head {}".format(result.value))
         return result.value
 
 

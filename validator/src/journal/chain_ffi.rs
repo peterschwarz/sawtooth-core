@@ -17,6 +17,7 @@
 use cpython;
 use cpython::{FromPyObject, ObjectProtocol, PyDict, PyList, PyObject, PyResult, Python,
               PythonObject, ToPyObject};
+use pylogger;
 use journal::chain::*;
 use py_ffi;
 use std::ffi::CStr;
@@ -26,9 +27,6 @@ use std::os::raw::{c_char, c_void};
 use batch::Batch;
 use block::Block;
 use transaction::Transaction;
-
-use scheduler::TxnExecutionResult;
-use scheduler::TransactionResult;
 
 use protobuf;
 use protobuf::Message;
@@ -148,6 +146,7 @@ pub extern "C" fn chain_controller_start(chain_controller: *mut c_void) -> Error
         (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
             .start();
     }
+
     ErrorCode::Success
 }
 
@@ -161,6 +160,7 @@ pub extern "C" fn chain_controller_stop(chain_controller: *mut c_void) -> ErrorC
         (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
             .stop();
     }
+    println!("{}({}): chain controller started", file!(), line!());
     ErrorCode::Success
 }
 
@@ -212,14 +212,12 @@ pub extern "C" fn chain_controller_queue_block(
         match PyObject::from_borrowed_ptr(py, block).extract(py) {
             Ok(val) => val,
             Err(py_err) => {
-                py_err.print(py);
+                pylogger::exception(py, "chain_controller_queue_block: unable to get block", py_err);
                 return ErrorCode::InvalidPythonObject;
             }
         }
     };
     unsafe {
-        println!("Queuing {}", block);
-
         let controller = (*(chain_controller
             as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
             .light_clone();
@@ -227,6 +225,8 @@ pub extern "C" fn chain_controller_queue_block(
         py.allow_threads(move || {
             controller.queue_block(block);
         });
+
+        println!("Queued Block");
     }
 
     ErrorCode::Success
@@ -269,7 +269,7 @@ impl BlockCache for PyBlockCache {
             .call_method(py, "__contains__", (block_id,), None)
         {
             Err(py_err) => {
-                py_err.print(py);
+                pylogger::exception(py, "Unable to call __contains__ on BlockCache", py_err);
                 false
             }
             Ok(py_bool) => py_bool.extract(py).expect("Unable to extract boolean"),
@@ -287,7 +287,7 @@ impl BlockCache for PyBlockCache {
             None,
         ) {
             Err(py_err) => {
-                py_err.print(py);
+                pylogger::exception(py, "Unable to call __setitem__ on BlockCache", py_err);
                 ()
             }
             Ok(_) => (),
@@ -301,7 +301,7 @@ impl BlockCache for PyBlockCache {
         match self.py_block_cache
             .call_method(py, "__getitem__", (block_id,), None)
         {
-            Err(py_err) => {
+            Err(_) => {
                 // This is probably a key error, so we can return none
                 None
             }
@@ -326,9 +326,8 @@ impl PyBlockValidator {
         match self.py_block_validator
             .call_method(py, fn_name, (block_id,), None)
         {
-            Err(py_err) => {
+            Err(_) => {
                 // Presumably a KeyError, so no
-                py_err.print(py);
                 false
             }
             Ok(py_bool) => py_bool.extract(py).expect("Unable to extract boolean"),
@@ -396,7 +395,7 @@ impl BlockValidator for PyBlockValidator {
             )
             .map(|_| ())
             .map_err(|py_err| {
-                py_err.print(py);
+                pylogger::exception(py, "Unable to call submit_blocks_for_verification", py_err);
                 ()
             })
             .unwrap_or(())
@@ -447,9 +446,8 @@ impl ChainWriter for PyBlockStore {
             .call_method(py, "update_chain", (new_chain, old_chain), None)
             .map(|_| ())
             .map_err(|py_err| {
-                py_err.print(py);
                 ChainControllerError::ChainUpdateError(
-                    "An error occurred while executing update_chain".into(),
+                    format!("An error occurred while executing update_chain: {}", py_err.get_type(py).name(py))
                 )
             })
     }
@@ -464,7 +462,7 @@ impl ChainReader for PyBlockStore {
             .getattr(py, "chain_head")
             .and_then(|result| result.extract(py))
             .map_err(|py_err| {
-                py_err.print(py);
+                pylogger::exception(py, "Unable to call block_store.chain_head", py_err);
                 ChainReadError::GeneralReadError("Unable to read from python block store".into())
             })
     }
@@ -489,7 +487,7 @@ impl ChainObserver for PyChainObserver {
             .call_method(py, "chain_update", (block, receipts), None)
             .map(|_| ())
             .map_err(|py_err| {
-                py_err.print(py);
+                pylogger::exception(py, "Unable to call observer.chain_update", py_err);
                 ()
             })
             .unwrap_or(())
@@ -522,7 +520,7 @@ impl ChainHeadUpdateObserver for PyChainHeadUpdateObserver {
             .call(py, (block, committed_batches, uncommitted_batches), None)
             .map(|_| ())
             .map_err(|py_err| {
-                py_err.print(py);
+                pylogger::exception(py, "Unable to call chain head observer on_chain_updated", py_err);
                 ()
             })
             .unwrap_or(())
