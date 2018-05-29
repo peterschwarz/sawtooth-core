@@ -141,6 +141,19 @@ pub extern "C" fn chain_controller_start(chain_controller: *mut c_void) -> Error
     if chain_controller.is_null() {
         return ErrorCode::NullPointerProvided;
     }
+    {
+        let gil_guard = Python::acquire_gil();
+        let py = gil_guard.python();
+        let block_wrapper_mod = py.import("sawtooth_validator.journal.block_wrapper")
+            .map_err(|err| {
+                err.print(py);
+                // pylogger::exception(py, "Unable to import block_wrapper", err);
+                "Failed to import block_wrapper"
+            })
+            .expect("Unable to import block_wrapper");
+
+        println!("{:?}", block_wrapper_mod.name(py));
+    }
 
     unsafe {
         (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
@@ -160,7 +173,6 @@ pub extern "C" fn chain_controller_stop(chain_controller: *mut c_void) -> ErrorC
         (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>))
             .stop();
     }
-    println!("{}({}): chain controller started", file!(), line!());
     ErrorCode::Success
 }
 
@@ -225,8 +237,6 @@ pub extern "C" fn chain_controller_queue_block(
         py.allow_threads(move || {
             controller.queue_block(block);
         });
-
-        println!("Queued Block");
     }
 
     ErrorCode::Success
@@ -381,9 +391,9 @@ impl BlockValidator for PyBlockValidator {
             ),
         ).unwrap();
         let py_callback = py.eval(
-            "lambda can_commit, result: f(ptr, can_commit, result)",
-            None,
+            "lambda can_commit, result: callback(ptr, can_commit, result)",
             Some(&dict),
+            None,
         ).unwrap();
 
         self.py_block_validator
@@ -532,6 +542,11 @@ impl ToPyObject for Block {
 
     fn to_py_object(&self, py: Python) -> PyObject {
         let block_wrapper_mod = py.import("sawtooth_validator.journal.block_wrapper")
+            .map_err(|err| {
+                err.print(py);
+                // pylogger::exception(py, "Unable to import block_wrapper", err);
+                "Failed to import block_wrapper"
+            })
             .expect("Unable to import block_wrapper");
         let py_block_wrapper = block_wrapper_mod
             .get(py, "BlockWrapper")

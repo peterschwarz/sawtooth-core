@@ -26,6 +26,7 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::RecvError;
 use std::sync::mpsc::Sender;
@@ -48,6 +49,7 @@ pub enum ChainControllerError {
     ChainIdError(io::Error),
     ChainUpdateError(String),
     BlockValidationError(ValidationError),
+    BrokenQueue,
 }
 
 impl From<RecvError> for ChainControllerError {
@@ -212,12 +214,10 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
     }
 
     pub fn on_block_received(&mut self, block: Block) -> Result<(), ChainControllerError> {
-        println!("{}({}): block {}", file!(), line!(), block);
         let mut state = self.state
             .write()
             .expect("No lock holder should have poisoned the lock");
 
-        println!("{}({}): acquired lock", file!(), line!());
         if has_block_no_lock(&state, &block.header_signature) {
             return Ok(());
         }
@@ -234,7 +234,6 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
 
         state.block_cache.put(block.clone());
         self.submit_blocks_for_verification(&state.block_validator, &[block])?;
-        println!("{}({}): on_block_received done", file!(), line!());
         Ok(())
     }
 
@@ -263,7 +262,6 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 state.chain_head.as_ref().unwrap(),
                 new_block
             );
-            println!("Verify block again: {}", new_block);
             if let Err(err) =
                 self.submit_blocks_for_verification(&state.block_validator, &[new_block])
             {
@@ -296,7 +294,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
             state.chain_head.as_ref().map(|block| {
                 block.batches.iter().for_each(|batch| {
                     if batch.trace {
-                        println!(
+                        debug!(
                             "TRACE: {}: ChainController.on_block_validated",
                             batch.header_signature
                         )
@@ -335,9 +333,9 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         block_validator: &BV,
         blocks: &[Block],
     ) -> Result<(), ChainControllerError> {
-        println!("submitting {:?} for verification", blocks);
         let mut chain_controller_copy = self.light_clone();
         block_validator.submit_blocks_for_verification(blocks, move |commit_new_block, result| {
+            println!("{} ({}): In callback", file!(), line!());
             chain_controller_copy.on_block_validated(commit_new_block, result)
         });
         Ok(())
@@ -345,22 +343,20 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
 
     pub fn queue_block(&self, block: Block) {
         if self.block_queue_sender.is_some() {
-            println!("Before thread: Queuing block {} for validation", block);
             let sender = self.block_queue_sender.clone();
-            thread::spawn(move || {
-                println!("In thread: Queuing block {} for validation", block);
+            let builder = thread::Builder::new()
+                .name("queue_block".into());
+            builder.spawn(move || {
                 if let Err(err) = sender.as_ref().unwrap().send(block) {
                     error!("Unable to add block to block queue: {}", err);
                 }
-            });
+            }).unwrap();
         }
     }
 
     pub fn start(&mut self) {
         let mut stop_handle = self.stop_handle.lock().unwrap();
         if stop_handle.is_none() {
-            println!("{}({}): Starting chain controller", file!(), line!());
-
             {
                 // we need to check to see if a genesis block was created and stored,
                 // before this controller was started
@@ -374,16 +370,15 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                     .expect("Invalid block store. Head of the block chain cannot be determined");
 
                 if chain_head.is_some() {
-                    println!(
-                        //info!(
+                    info!(
                         "Chain controller initialized with chain head: {}",
                         chain_head.as_ref().unwrap()
                     );
+                    let notify_block = chain_head.clone().unwrap();
                     state.chain_head = chain_head;
+                    notify_on_chain_updated(&mut state, notify_block, vec![], vec![]);
                 }
             }
-
-            println!("{}({}): Finished loading chain head", file!(), line!());
 
             let (block_queue_sender, block_queue_receiver) = channel();
             self.block_queue_sender = Some(block_queue_sender);
@@ -395,14 +390,13 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 exit_flag.clone(),
             );
             *stop_handle = Some(ChainThreadStopHandle::new(exit_flag));
-            println!("{}({}): Spawning chain thread", file!(), line!());
-            thread::spawn(move || {
-                println!("{}({}): chain thread started", file!(), line!());
+            let builder = thread::Builder::new()
+                .name("ChainThread".into());
+            builder.spawn(move || {
                 if let Err(err) = chain_thread.run() {
-                    println!("Error occurred during ChainController loop: {:?}", err);
                     error!("Error occurred during ChainController loop: {:?}", err);
                 }
-            });
+            }).unwrap();
         }
     }
 
@@ -442,7 +436,6 @@ fn set_genesis<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>(
                 block.header_signature
             );
         } else {
-            println!("Validating {} as Genesis block", block);
             state.block_validator.validate_block(block.clone())?;
 
             if chain_id.is_none() {
@@ -528,14 +521,13 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
     fn run(&mut self) -> Result<(), ChainControllerError> {
         loop {
             let block = match self.block_queue.recv_timeout(Duration::from_secs(1)) {
-                Err(_) => continue,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(err) => break Err(ChainControllerError::BrokenQueue),
                 Ok(block) => block,
             };
-            println!("Pulled {} from queue", block);
             self.chain_controller.on_block_received(block)?;
 
             if self.exit.load(Ordering::Relaxed) {
-                println!("Shutting down Chain Thread...");
                 break Ok(());
             }
         }
@@ -555,7 +547,6 @@ impl ChainThreadStopHandle {
 
 impl StopHandle for ChainThreadStopHandle {
     fn stop(&self) {
-        println!("Stopping chain thread");
         self.exit.store(true, Ordering::Relaxed)
     }
 }
@@ -573,7 +564,6 @@ impl ChainIdManager {
     }
 
     pub fn save_block_chain_id(&self, block_chain_id: &str) -> Result<(), io::Error> {
-        println!("Writing block chain id");
 
         let mut path = PathBuf::new();
         path.push(&self.data_dir);
