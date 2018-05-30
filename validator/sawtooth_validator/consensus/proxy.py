@@ -71,8 +71,9 @@ class ConsensusProxy:
         LOGGER.debug("ConsensusProxy.finalize_block")
         result = self._block_publisher.finalize_block(
             consensus=consensus_data)
-        return self._block_publisher.publish_block(
-            result.block, result.injected_batches)
+        return bytes.fromhex(
+            self._block_publisher.publish_block(
+                result.block, result.injected_batches))
 
     def cancel_block(self):
         LOGGER.debug("ConsensusProxy.cancel_block")
