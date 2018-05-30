@@ -22,5 +22,6 @@ pub mod block_store;
 pub mod block_wrapper;
 pub mod block_wrapper_ffi;
 mod candidate_block;
+pub mod chain;
 mod chain_commit_state;
 pub mod publisher;
