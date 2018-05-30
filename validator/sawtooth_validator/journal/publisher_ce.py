@@ -705,6 +705,8 @@ class BlockPublisher(object):
             self._block_sender.send(blkw.block, keep_batches=injected_batches)
             self._blocks_published_count.inc()
 
+            return bytes.fromhex(blkw.identifier)
+
     def has_batch(self, batch_id):
         with self._lock:
             if batch_id in self._pending_batches:
