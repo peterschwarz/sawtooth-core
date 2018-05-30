@@ -135,7 +135,11 @@ pub extern "C" fn chain_controller_drop(chain_controller: *mut c_void) -> ErrorC
         return ErrorCode::NullPointerProvided;
     }
 
-    unsafe { Box::from_raw(chain_controller) };
+    unsafe {
+        Box::from_raw(
+            chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator, PyBlockStore>,
+        )
+    };
     ErrorCode::Success
 }
 
