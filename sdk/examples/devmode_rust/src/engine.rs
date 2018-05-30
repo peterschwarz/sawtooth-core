@@ -75,7 +75,7 @@ impl DevmodeService {
             block_id = self.service.finalize_block(consensus.clone());
         }
 
-        query_result.expect("Failed to finalize block")
+        block_id.expect("Failed to finalize block")
     }
 
     fn check_block(&mut self, block_id: BlockId) {

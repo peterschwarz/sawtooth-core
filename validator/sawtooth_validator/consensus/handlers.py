@@ -209,7 +209,7 @@ class ConsensusFinalizeBlockHandler(ConsensusServiceHandler):
 
     def handle_request(self, request, response):
         try:
-            self._proxy.finalize_block(request.data)
+            response.block_id = self._proxy.finalize_block(request.data)
         except BlockNotInitialized:
             response.status =\
                 consensus_pb2.ConsensusFinalizeBlockResponse.INVALID_STATE
