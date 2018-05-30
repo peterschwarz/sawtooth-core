@@ -63,6 +63,10 @@ class ConsensusProxy:
             self._block_publisher.initialize_block(
                 self._chain_controller.chain_head)
 
+    def summarize_block(self):
+        LOGGER.debug("ConsensusProxy.summarize_block")
+        return self._block_publisher.summarize_block()
+
     def finalize_block(self, consensus_data):
         LOGGER.debug("ConsensusProxy.finalize_block")
         result = self._block_publisher.finalize_block(

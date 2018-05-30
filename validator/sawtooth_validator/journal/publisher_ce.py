@@ -17,6 +17,7 @@
 
 import abc
 from collections import deque
+import hashlib
 import logging
 import queue
 from threading import RLock
@@ -150,6 +151,8 @@ class _CandidateBlock(object):
         self._settings_view = settings_view
         self._identity_signer = identity_signer
 
+        self._summary = None
+
     def __del__(self):
         self.cancel()
 
@@ -174,8 +177,11 @@ class _CandidateBlock(object):
 
     def can_add_batch(self):
         return (
-            self._max_batches == 0
-            or len(self._pending_batches) < self._max_batches
+            self._summary is None
+            and (
+                self._max_batches == 0
+                or len(self._pending_batches) < self._max_batches
+            )
         )
 
     def _check_batch_dependencies(self, batch, committed_txn_cache):
@@ -304,7 +310,7 @@ class _CandidateBlock(object):
         signature = self._identity_signer.sign(header_bytes)
         block.set_signature(signature)
 
-    def finalize(self, consensus, force=False):
+    def summarize(self, force=False):
         """Compose the final Block to publish. This involves flushing
         the scheduler, having consensus bless the block, and signing
         the block.
@@ -312,6 +318,9 @@ class _CandidateBlock(object):
         In both cases the pending_batches will contain the list of batches
         that need to be added to the next Block that is built.
         """
+        if self._summary is not None:
+            return self._summary
+
         if not (force or self._pending_batches):
             raise BlockEmpty()
 
@@ -387,7 +396,8 @@ class _CandidateBlock(object):
                         x for x in self._pending_batches
                         if x not in bad_batches
                     ])
-                    return self._build_result(None, pending_batches)
+                    self._pending_batches = pending_batches
+                    return None
 
                 else:
                     builder.add_batch(batch)
@@ -401,18 +411,38 @@ class _CandidateBlock(object):
 
         if state_hash is None or not builder.batches:
             LOGGER.warning("Abandoning block %s: no batches added", builder)
-            return self._build_result(None, pending_batches)
-
-        builder.block_header.consensus = consensus
+            self._pending_batches = pending_batches
+            return None
 
         builder.set_state_hash(state_hash)
-        self._sign_block(builder)
-        return self._build_result(builder.build_block(), pending_batches)
 
-    def _build_result(self, block, remaining):
+        # Build a summary of the contents of this block prior to signing it
+        hasher = hashlib.sha256()
+        for batch in builder.batches:
+            hasher.update(batch.header_signature.encode())
+        self._summary = hasher.digest()
+        return self._summary
+
+    def finalize(self, consensus, force=False):
+        """Compose the final Block to publish. This involves setting the
+        consensus payload for the block, and signing the block.
+
+        Returns:
+            FinalizeBlockResult
+        """
+        summary = self.summarize(force)
+        if summary is None:
+            return self._build_result(None)
+
+        builder = self._block_builder
+        builder.block_header.consensus = consensus
+        self._sign_block(builder)
+        return self._build_result(builder.build_block())
+
+    def _build_result(self, block):
         return FinalizeBlockResult(
             block=block,
-            remaining_batches=remaining,
+            remaining_batches=self._pending_batches,
             last_batch=self._last_batch(),
             injected_batches=self._injected_batch_ids)
 
@@ -672,6 +702,22 @@ class BlockPublisher(object):
         """Returns whether the block publisher is ready to build a block.
         """
         return self._chain_head is not None and self._pending_batches
+
+    def summarize_block(self, force=False):
+        with self._lock:
+            if self._candidate_block is None:
+                raise BlockNotInitialized()
+
+            summary = self._candidate_block.summarize(force)
+            if summary is None:
+                previous_block =\
+                    self._block_cache[self._candidate_block.previous_block_id]
+                self._candidate_block = None
+
+                self.initialize_block(previous_block)
+                raise BlockEmpty()
+
+            return summary
 
     def finalize_block(self, consensus=None, force=False):
         with self._lock:

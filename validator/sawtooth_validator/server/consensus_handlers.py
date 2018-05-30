@@ -34,6 +34,9 @@ def add(
     handler = handlers.ConsensusInitializeBlockHandler(consensus_proxy)
     dispatcher.add_handler(handler.request_type, handler, thread_pool)
 
+    handler = handlers.ConsensusSummarizeBlockHandler(consensus_proxy)
+    dispatcher.add_handler(handler.request_type, handler, thread_pool)
+
     handler = handlers.ConsensusFinalizeBlockHandler(consensus_proxy)
     dispatcher.add_handler(handler.request_type, handler, thread_pool)
 

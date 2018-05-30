@@ -13,7 +13,7 @@ class TestHandlers(unittest.TestCase):
         self.mock_proxy = Mock()
 
     def test_consensus_register_handler(self):
-        handler = handlers.ConsensusRegisterHandler()
+        handler = handlers.ConsensusRegisterHandler(self.mock_proxy)
         request_class = handler.request_class
         request = request_class()
         request.name = "test"
@@ -54,6 +54,13 @@ class TestHandlers(unittest.TestCase):
         handler.handle(None, request.SerializeToString())
         self.mock_proxy.initialize_block.assert_called_with(
             request.previous_id)
+
+    def test_consensus_summarize_block_handler(self):
+        handler = handlers.ConsensusSummarizeBlockHandler(self.mock_proxy)
+        request_class = handler.request_class
+        request = request_class()
+        handler.handle(None, request.SerializeToString())
+        self.mock_proxy.summarize_block.assert_called_with()
 
     def test_consensus_finalize_block_handler(self):
         handler = handlers.ConsensusFinalizeBlockHandler(self.mock_proxy)
@@ -193,6 +200,14 @@ class TestProxy(unittest.TestCase):
         self._proxy.initialize_block(previous_id=bytes([0x34]))
         self._mock_block_publisher\
             .initialize_block.assert_called_with("a block")
+
+    def test_summarize_block(self):
+        self._mock_block_publisher.summarize_block.return_value =\
+            b"summary"
+
+        summary = self._proxy.summarize_block()
+        self._mock_block_publisher.summarize_block.assert_called_with()
+        self.assertEqual(summary, b"summary")
 
     def test_finalize_block(self):
         self._mock_block_publisher.finalize_block.return_value =\
