@@ -64,6 +64,7 @@ from sawtooth_validator.server.events.broadcaster import EventBroadcaster
 from sawtooth_validator.journal.receipt_store import TransactionReceiptStore
 
 from sawtooth_validator.server import network_handlers
+from sawtooth_validator.server import network_handlers_ce
 from sawtooth_validator.server import component_handlers
 from sawtooth_validator.server import consensus_handlers
 
@@ -409,11 +410,18 @@ class Validator(object):
         completer.set_chain_has_block(chain_controller.has_block)
 
         # -- Register Message Handler -- #
-        network_handlers.add(
-            network_dispatcher, network_service, gossip, completer,
-            responder, network_thread_pool, sig_pool,
-            chain_controller.has_block, block_publisher.has_batch,
-            permission_verifier, block_publisher)
+        if consensus_engine_enabled:
+            network_handlers_ce.add(
+                network_dispatcher, network_service, gossip, completer,
+                responder, network_thread_pool, sig_pool,
+                chain_controller.has_block, block_publisher.has_batch,
+                permission_verifier, block_publisher, consensus_notifier)
+        else:
+            network_handlers.add(
+                network_dispatcher, network_service, gossip, completer,
+                responder, network_thread_pool, sig_pool,
+                chain_controller.has_block, block_publisher.has_batch,
+                permission_verifier, block_publisher)
 
         component_handlers.add(
             component_dispatcher, gossip, context_manager,
@@ -437,6 +445,8 @@ class Validator(object):
                 block_cache=block_cache,
                 chain_controller=chain_controller,
                 block_publisher=block_publisher,
+                gossip=gossip,
+                identity_signer=identity_signer,
                 settings_view_factory=SettingsViewFactory(state_view_factory),
                 state_view_factory=state_view_factory)
 

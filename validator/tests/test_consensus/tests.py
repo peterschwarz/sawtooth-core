@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import Mock
 
+from sawtooth_validator.protobuf.validator_pb2 import Message
+
 from sawtooth_validator.consensus import handlers
 from sawtooth_validator.consensus.proxy import ConsensusProxy
 
@@ -173,22 +175,22 @@ class TestProxy(unittest.TestCase):
         self._mock_block_cache = {}
         self._mock_block_publisher = Mock()
         self._mock_chain_controller = Mock()
+        self._mock_gossip = Mock()
         self._mock_settings_view_factory = Mock()
         self._mock_state_view_factory = Mock()
         self._proxy = ConsensusProxy(
             block_cache=self._mock_block_cache,
             chain_controller=self._mock_chain_controller,
             block_publisher=self._mock_block_publisher,
+            gossip=self._mock_gossip,
             settings_view_factory=self._mock_settings_view_factory,
             state_view_factory=self._mock_state_view_factory)
 
     def test_send_to(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.send_to(None, None)
+        self._proxy.send_to(peer_id='peer_id', message=b'message')
 
     def test_broadcast(self):
-        with self.assertRaises(NotImplementedError):
-            self._proxy.broadcast(None)
+        self._proxy.broadcast(message=b'message')
 
     # Using block publisher
     def test_initialize_block(self):
