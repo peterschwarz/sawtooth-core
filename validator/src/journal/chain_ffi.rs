@@ -16,6 +16,7 @@
  */
 use cpython;
 use cpython::{FromPyObject, ObjectProtocol, PyList, PyObject, Python, PythonObject, ToPyObject};
+use database::lmdb::LmdbDatabase;
 use journal::block_wrapper::BlockWrapper;
 use journal::chain::*;
 use py_ffi;
@@ -48,6 +49,7 @@ pub extern "C" fn chain_controller_new(
     block_store: *mut py_ffi::PyObject,
     block_cache: *mut py_ffi::PyObject,
     block_validator: *mut py_ffi::PyObject,
+    state_database: *const c_void,
     chain_head_lock: *mut py_ffi::PyObject,
     on_chain_updated: *mut py_ffi::PyObject,
     observers: *mut py_ffi::PyObject,
@@ -82,6 +84,10 @@ pub extern "C" fn chain_controller_new(
         return ErrorCode::NullPointerProvided;
     }
 
+    if state_database.is_null() {
+        return ErrorCode::NullPointerProvided;
+    }
+
     let data_dir = unsafe {
         match CStr::from_ptr(data_directory).to_str() {
             Ok(s) => s,
@@ -111,6 +117,8 @@ pub extern "C" fn chain_controller_new(
         return ErrorCode::InvalidPythonObject;
     };
 
+    let state_database = unsafe { (*(state_database as *const LmdbDatabase)).clone() };
+
     let chain_controller = ChainController::new(
         PyBlockCache::new(py_block_cache),
         PyBlockValidator::new(py_block_validator),
@@ -120,6 +128,7 @@ pub extern "C" fn chain_controller_new(
         data_dir.into(),
         Box::new(PyChainHeadUpdateObserver::new(py_on_chain_updated)),
         observer_wrappers,
+        state_database,
     );
 
     unsafe {

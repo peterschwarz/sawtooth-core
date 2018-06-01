@@ -38,6 +38,7 @@ use std::time::Duration;
 use protobuf;
 
 use batch::Batch;
+use database::lmdb::LmdbDatabase;
 use journal;
 use journal::block_wrapper::BlockWrapper;
 use metrics;
@@ -199,6 +200,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
         data_dir: String,
         chain_head_update_observer: Box<ChainHeadUpdateObserver>,
         observers: Vec<Box<ChainObserver>>,
+        state_database: LmdbDatabase,
     ) -> Self {
         let mut chain_controller = ChainController {
             state: Arc::new(RwLock::new(ChainControllerState {
@@ -211,7 +213,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 chain_head_update_observer,
                 observers,
                 chain_head: None,
-                state_prune_manager: StatePruneManager::new(),
+                state_prune_manager: StatePruneManager::new(state_database),
             })),
             stop_handle: Arc::new(Mutex::new(None)),
             block_queue_sender: None,
@@ -702,15 +704,18 @@ impl ChainIdManager {
 /// the queue will be pruned.  This allows state roots to remain in the queue for
 /// a period of time, on the chance that they are from a chain that has been
 /// abandoned and then re-chosen as the primary chain.
-#[derive(Default)]
 struct StatePruneManager {
     // Contains the state root hashes slated for pruning
     state_root_prune_queue: VecDeque<String>,
+    state_database: LmdbDatabase,
 }
 
 impl StatePruneManager {
-    fn new() -> Self {
-        StatePruneManager::default()
+    fn new(state_database: LmdbDatabase) -> Self {
+        StatePruneManager {
+            state_root_prune_queue: VecDeque::new(),
+            state_database,
+        }
     }
 
     /// Updates the pruning queue.  Abandoned roots will be added to the queue.

@@ -297,6 +297,7 @@ class Validator(object):
             block_store,
             block_cache,
             block_validator,
+            global_state_db,
             block_publisher.chain_head_lock,
             block_publisher.on_chain_updated,
             data_dir,
