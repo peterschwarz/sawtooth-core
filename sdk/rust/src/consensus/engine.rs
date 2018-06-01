@@ -27,7 +27,7 @@ use consensus::service::Service;
 pub enum Update {
     PeerConnected(PeerInfo),
     PeerDisconnected(PeerId),
-    PeerMessage(PeerMessage),
+    PeerMessage(PeerMessage, PeerId),
     BlockNew(Block),
     BlockValid(BlockId),
     BlockInvalid(BlockId),
@@ -304,7 +304,7 @@ pub mod tests {
                             Update::PeerDisconnected(_) => {
                                 (*self.calls.lock().unwrap()).push("PeerDisconnected".into())
                             }
-                            Update::PeerMessage(_) => {
+                            Update::PeerMessage(_, _) => {
                                 (*self.calls.lock().unwrap()).push("PeerMessage".into())
                             }
                             Update::BlockNew(_) => {
@@ -358,7 +358,7 @@ pub mod tests {
             .send(Update::PeerDisconnected(Default::default()))
             .unwrap();
         sender
-            .send(Update::PeerMessage(Default::default()))
+            .send(Update::PeerMessage(Default::default(), Default::default()))
             .unwrap();
         sender.send(Update::BlockNew(Default::default())).unwrap();
         sender.send(Update::BlockValid(Default::default())).unwrap();
