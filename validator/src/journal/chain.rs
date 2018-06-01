@@ -15,6 +15,7 @@
  * ------------------------------------------------------------------------------
  */
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -676,6 +677,51 @@ impl ChainIdManager {
             Err(ref err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(err) => Err(err),
         }
+    }
+}
+
+/// The StatePruneManager manages a collection of state root hashes that will be
+/// prune from the MerkleDatabase at intervals.  Pruning will occur by decimating
+/// the state root hashes.  I.e. ten percent (rounded down) of the state roots in
+/// the queue will be pruned.  This allows state roots to remain in the queue for
+/// a period of time, on the chance that they are from a chain that has been
+/// abandoned and then re-chosen as the primary chain.
+#[derive(Default)]
+struct StatePruneManager {
+    // Contains the state root hashes slated for pruning
+    state_root_prune_queue: VecDeque<String>,
+}
+
+impl StatePruneManager {
+    fn new() -> Self {
+        StatePruneManager::default()
+    }
+
+    /// Updates the pruning queue.  Abandoned roots will be added to the queue.
+    /// Added roots will be removed from the queue.  This ensures that the state
+    /// roots won't be removed, regardless of the chain state.
+    fn update_queue(&mut self, added_roots: &[&str], abandoned_roots: &[&str]) {
+        // Add all the state_root_hashes to the pruning queue that have may be discarded
+        abandoned_roots.iter().for_each(|state_root_hash| {
+            let state_root_hash = state_root_hash.to_string();
+            if !self.state_root_prune_queue.contains(&state_root_hash) {
+                debug!("Adding {} to pruning queue", state_root_hash);
+                self.state_root_prune_queue.push_back(state_root_hash);
+            }
+        });
+
+        // Remove any state root hashes from the pruning queue that we may have switched
+        // back too from an alternate chain
+        added_roots.iter().for_each(|state_root_hash| {
+            self.state_root_prune_queue.retain(|hash| {
+                if hash != state_root_hash {
+                    true
+                } else {
+                    debug!("Removing {} from pruning queue", state_root_hash);
+                    false
+                }
+            })
+        });
     }
 }
 
