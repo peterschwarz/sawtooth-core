@@ -175,6 +175,8 @@ struct ChainControllerState<BC: BlockCache, BV: BlockValidator, CW: ChainWriter>
     chain_id_manager: ChainIdManager,
     chain_head_update_observer: Box<ChainHeadUpdateObserver>,
     observers: Vec<Box<ChainObserver>>,
+
+    state_prune_manager: StatePruneManager,
 }
 
 #[derive(Clone)]
@@ -209,6 +211,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
                 chain_head_update_observer,
                 observers,
                 chain_head: None,
+                state_prune_manager: StatePruneManager::new(),
             })),
             stop_handle: Arc::new(Mutex::new(None)),
             block_queue_sender: None,
@@ -292,6 +295,19 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
             let _chain_head_guard = state.chain_head_lock.lock();
             let chain_head_block = new_block.clone();
             state.chain_head = Some(new_block);
+
+            state.state_prune_manager.update_queue(
+                &result
+                    .new_chain
+                    .iter()
+                    .map(|block| block.state_root_hash())
+                    .collect::<Vec<_>>(),
+                &result
+                    .current_chain
+                    .iter()
+                    .map(|block| block.state_root_hash())
+                    .collect::<Vec<_>>(),
+            );
 
             if let Err(err) = state
                 .chain_writer
