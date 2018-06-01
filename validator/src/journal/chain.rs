@@ -727,13 +727,9 @@ impl StatePruneManager {
     /// roots won't be removed, regardless of the chain state.
     fn update_queue(&mut self, added_roots: &[&str], abandoned_roots: &[&str]) {
         // Add all the state_root_hashes to the pruning queue that have may be discarded
-        abandoned_roots.iter().for_each(|state_root_hash| {
-            let state_root_hash = state_root_hash.to_string();
-            if !self.state_root_prune_queue.contains(&state_root_hash) {
-                debug!("Adding {} to pruning queue", state_root_hash);
-                self.state_root_prune_queue.push_back(state_root_hash);
-            }
-        });
+        abandoned_roots
+            .iter()
+            .for_each(|state_root_hash| self.add_to_queue(state_root_hash));
 
         // Remove any state root hashes from the pruning queue that we may have switched
         // back too from an alternate chain
@@ -747,6 +743,15 @@ impl StatePruneManager {
                 }
             })
         });
+    }
+
+    /// Add a single state root to the pruning queue.
+    fn add_to_queue(&mut self, state_root_hash: &str) {
+        let state_root_hash = state_root_hash.into();
+        if !self.state_root_prune_queue.contains(&state_root_hash) {
+            debug!("Adding {} to pruning queue", state_root_hash);
+            self.state_root_prune_queue.push_back(state_root_hash);
+        }
     }
 
     /// Remove the first ten percent (floored) of the prune queue.
