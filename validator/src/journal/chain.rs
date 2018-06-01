@@ -42,6 +42,7 @@ use database::lmdb::LmdbDatabase;
 use journal;
 use journal::block_wrapper::BlockWrapper;
 use metrics;
+use state::merkle::MerkleDatabase;
 
 use proto::transaction_receipt::TransactionReceipt;
 use scheduler::TxnExecutionResult;
@@ -380,6 +381,9 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static, CW: ChainWriter + '
             let mut committed_transactions_gauge =
                 COLLECTOR.gauge("ChainController.committed_transactions_gauge", None, None);
             committed_transactions_gauge.set_value(total_committed_txns);
+
+            // Execute pruning:
+            state.state_prune_manager.decimate()
         } else {
             info!("Rejected new chain head: {}", new_block);
         }
@@ -743,6 +747,45 @@ impl StatePruneManager {
                 }
             })
         });
+    }
+
+    /// Remove the first ten percent (floored) of the prune queue.
+    fn decimate(&mut self) {
+        let prune_count = (self.state_root_prune_queue.len() as f64 / 10.0).floor() as usize;
+
+        let mut total_pruned_entries: usize = 0;
+        for _ in 0..prune_count {
+            if let Some(state_root) = self.state_root_prune_queue.pop_front() {
+                match MerkleDatabase::prune(&self.state_database, &state_root) {
+                    Ok(removed_keys) => {
+                        total_pruned_entries += removed_keys.len();
+
+                        let mut state_roots_pruned_count =
+                            COLLECTOR.counter("StatePruneManager.state_roots_pruned", None, None);
+                        state_roots_pruned_count.inc();
+
+                        // the state root was not pruned (it is likely the root of a
+                        // fork), so push it back into the queue.
+                        if removed_keys.is_empty() {
+                            self.state_root_prune_queue.push_back(state_root);
+                        }
+                    }
+                    Err(err) => {
+                        error!("Unable to prune state root {}: {:?}", state_root, err);
+                        self.state_root_prune_queue.push_back(state_root);
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+
+        if total_pruned_entries > 0 {
+            info!(
+                "Pruned {} keys from the Global state Database",
+                total_pruned_entries
+            );
+        }
     }
 }
 
