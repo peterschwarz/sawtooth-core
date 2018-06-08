@@ -46,7 +46,6 @@ pub struct FinalizeBlockResult {
 
 pub struct CandidateBlock {
     block_store: cpython::PyObject,
-    consensus: cpython::PyObject,
     scheduler: Box<Scheduler>,
     max_batches: usize,
     block_builder: cpython::PyObject,
@@ -64,7 +63,6 @@ pub struct CandidateBlock {
 impl CandidateBlock {
     pub fn new(
         block_store: cpython::PyObject,
-        consensus: cpython::PyObject,
         scheduler: Box<Scheduler>,
         committed_txn_cache: TransactionCommitCache,
         block_builder: cpython::PyObject,
@@ -75,7 +73,6 @@ impl CandidateBlock {
     ) -> Self {
         CandidateBlock {
             block_store,
-            consensus,
             scheduler,
             max_batches,
             committed_txn_cache,
@@ -332,32 +329,9 @@ impl CandidateBlock {
             .expect("BlockBuilder has no method 'set_signature'");
     }
 
-    fn check_publish_block(&self, py: cpython::Python, block_builder: &cpython::PyObject) -> bool {
-        self.consensus
-            .call_method(
-                py,
-                "check_publish_block",
-                (block_builder
-                    .getattr(py, "block_header")
-                    .expect("BlockBuilder has no attribute 'block_header'"),),
-                None,
-            )
-            .expect("consensus has no method 'check_publish_block'")
-            .extract::<bool>(py)
-            .unwrap()
-    }
-
     pub fn finalize(&mut self, force: bool) -> Result<FinalizeBlockResult, CandidateBlockError> {
         if !(force || !self.pending_batches.is_empty()) {
             return Err(CandidateBlockError::NoPendingBatchesRemaining);
-        }
-        {
-            let gil = cpython::Python::acquire_gil();
-            let py = gil.python();
-
-            if !self.check_publish_block(py, &self.block_builder) {
-                return Err(CandidateBlockError::ConsensusNotReady);
-            }
         }
 
         self.scheduler.finalize(true).unwrap();
@@ -443,16 +417,7 @@ impl CandidateBlock {
             debug!("Abandoning block, no batches added");
             return self.build_result(None, pending_batches);
         }
-        if !self.consensus_finalize_block(&builder) {
-            debug!("Abandoning block consensus failed to finalize it");
-            pending_batches.clear();
-            pending_batches.append(&mut self.pending_batches
-                .clone()
-                .into_iter()
-                .filter(|b| !bad_batches.contains(b))
-                .collect());
-            return self.build_result(None, pending_batches);
-        }
+
         let gil = cpython::Python::acquire_gil();
         let py = gil.python();
         builder
@@ -473,19 +438,6 @@ impl CandidateBlock {
             ),
             pending_batches,
         )
-    }
-
-    fn consensus_finalize_block(&self, builder: &cpython::PyObject) -> bool {
-        let gil = cpython::Python::acquire_gil();
-        let py = gil.python();
-        let block_header = builder
-            .getattr(py, "block_header")
-            .expect("BlockBuilder has no attribute 'block_header'");
-        self.consensus
-            .call_method(py, "finalize_block", (block_header,), None)
-            .expect("Consensus has no method 'finalize_block'")
-            .extract::<bool>(py)
-            .unwrap()
     }
 
     fn no_batches_added(&self, builder: &cpython::PyObject) -> bool {

@@ -119,10 +119,6 @@ pub extern "C" fn block_publisher_new(
         )
         .expect("Unable to create BatchPublisher");
 
-    let consensus_factory_mod = py.import("sawtooth_validator.journal.consensus.consensus_factory")
-        .expect("Unable to import 'sawtooth_validator.journal.consensus.consensus_factory'");
-    let consensus_factory = consensus_factory_mod.get(py, "ConsensusFactory").unwrap();
-
     let block_wrapper_mod = py.import("sawtooth_validator.journal.block_wrapper")
         .expect("Unable to import 'sawtooth_validator.journal.block_wrapper'");
 
@@ -160,7 +156,6 @@ pub extern "C" fn block_publisher_new(
         check_publish_block_frequency,
         batch_observers,
         batch_injector_factory,
-        consensus_factory,
         block_wrapper_class,
         block_header_class,
         block_builder_class,
@@ -178,21 +173,6 @@ pub extern "C" fn block_publisher_new(
 pub extern "C" fn block_publisher_drop(publisher: *mut c_void) -> ErrorCode {
     check_null!(publisher);
     unsafe { Box::from_raw(publisher as *mut BlockPublisher) };
-    ErrorCode::Success
-}
-
-// block_publisher_on_check_publish_block is used in tests
-#[no_mangle]
-pub extern "C" fn block_publisher_on_check_publish_block(
-    publisher: *mut c_void,
-    force: bool,
-) -> ErrorCode {
-    check_null!(publisher);
-    unsafe {
-        (*(publisher as *mut BlockPublisher))
-            .publisher
-            .on_check_publish_block(force)
-    };
     ErrorCode::Success
 }
 
