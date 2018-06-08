@@ -16,7 +16,7 @@
  */
 
 use std::ops::Deref;
-use std::sync::{Mutex, atomic::{AtomicBool, Ordering}, mpsc::Receiver};
+use std::sync::mpsc::Receiver;
 
 use hex;
 
@@ -32,6 +32,7 @@ pub enum Update {
     BlockValid(BlockId),
     BlockInvalid(BlockId),
     BlockCommit(BlockId),
+    Shutdown,
 }
 
 #[derive(Clone, Default, PartialEq, Eq, Hash, PartialOrd)]
@@ -159,37 +160,11 @@ pub trait Engine: Sync + Send {
         peers: Vec<PeerInfo>,
     );
 
-    /// Called before the engine is dropped, to give the engine a chance to notify peers and
-    /// cleanup
-    fn stop(&self);
-
     /// Get the version of this engine
     fn version(&self) -> String;
 
     /// Get the name of the engine, typically the algorithm being implemented
     fn name(&self) -> String;
-}
-
-/// Utility class for signaling that a background thread should shutdown
-#[derive(Default)]
-pub struct Exit {
-    flag: Mutex<AtomicBool>,
-}
-
-impl Exit {
-    pub fn new() -> Self {
-        Exit {
-            flag: Mutex::new(AtomicBool::new(false)),
-        }
-    }
-
-    pub fn get(&self) -> bool {
-        self.flag.lock().unwrap().load(Ordering::Relaxed)
-    }
-
-    pub fn set(&self) {
-        self.flag.lock().unwrap().store(true, Ordering::Relaxed);
-    }
 }
 
 #[derive(Debug)]
@@ -262,21 +237,18 @@ pub mod tests {
 
     pub struct MockEngine {
         calls: Arc<Mutex<Vec<String>>>,
-        exit: Exit,
     }
 
     impl MockEngine {
         pub fn new() -> Self {
             MockEngine {
                 calls: Arc::new(Mutex::new(Vec::new())),
-                exit: Exit::new(),
             }
         }
 
         pub fn with(amv: Arc<Mutex<Vec<String>>>) -> Self {
             MockEngine {
                 calls: amv,
-                exit: Exit::new(),
             }
         }
 
@@ -319,6 +291,10 @@ pub mod tests {
                             Update::BlockCommit(_) => {
                                 (*self.calls.lock().unwrap()).push("BlockCommit".into())
                             }
+                            Update::Shutdown => {
+                                println!("shutdown");
+                                break;
+                            }
                         };
                     }
                     Err(RecvTimeoutError::Disconnected) => {
@@ -327,16 +303,9 @@ pub mod tests {
                     }
                     Err(RecvTimeoutError::Timeout) => {
                         println!("timeout");
-                        if self.exit.get() {
-                            break;
-                        }
                     }
                 }
             }
-        }
-        fn stop(&self) {
-            (*self.calls.lock().unwrap()).push("stop".into());
-            self.exit.set();
         }
         fn version(&self) -> String {
             "0".into()
@@ -372,7 +341,9 @@ pub mod tests {
             let svc = Box::new(MockService {});
             eng_clone.start(receiver, svc, Default::default(), Default::default());
         });
-        eng.stop();
+        sender
+            .send(Update::Shutdown)
+            .unwrap();
         handle.join().unwrap();
         assert!(contains(&eng, "start"));
         assert!(contains(&eng, "PeerConnected"));
@@ -382,7 +353,6 @@ pub mod tests {
         assert!(contains(&eng, "BlockValid"));
         assert!(contains(&eng, "BlockInvalid"));
         assert!(contains(&eng, "BlockCommit"));
-        assert!(contains(&eng, "stop"));
     }
 
     fn contains(eng: &Arc<MockEngine>, expected: &str) -> bool {
