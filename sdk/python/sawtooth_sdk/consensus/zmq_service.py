@@ -28,10 +28,13 @@ class ZmqService(Service):
         self._version = version
 
     def _send(self, request, message_type, response_type):
-        response = self._stream.send(
+        response_bytes = self._stream.send(
             message_type=message_type,
             content=request.SerializeToString(),
         ).result(self._timeout).content
+
+        response = response_type()
+        response.ParseFromString(response_bytes)
 
         return response
 
@@ -122,7 +125,7 @@ class ZmqService(Service):
                 'Cannot summarize block in current state')
 
         if status == response_type.BLOCK_NOT_READY:
-            raise exceptions.BLOCK_NOT_READY(
+            raise exceptions.BlockNotReady(
                 'Block not ready to be summarize')
 
         if status != response_type.OK:
@@ -148,7 +151,7 @@ class ZmqService(Service):
                 'Cannot finalize block in current state')
 
         if status == response_type.BLOCK_NOT_READY:
-            raise exceptions.BLOCK_NOT_READY(
+            raise exceptions.BlockNotReady(
                 'Block not ready to be finalized')
 
         if status != response_type.OK:
