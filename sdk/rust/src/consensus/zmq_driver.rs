@@ -43,7 +43,7 @@ fn generate_correlation_id() -> String {
     rand::thread_rng().gen_ascii_chars().take(LENGTH).collect()
 }
 
-pub fn start<T: AsRef<str>, E: Engine + Send + 'static >(endpoint: T, engine: E) -> (Stop, Receiver<Error>) {
+pub fn start<T: AsRef<str>, E: Engine + Send + 'static >(endpoint: T, mut engine: E) -> (Stop, Receiver<Error>) {
     let validator_connection = ZmqMessageConnection::new(endpoint.as_ref());
     let (mut validator_sender, validator_receiver) = validator_connection.create();
 
@@ -74,13 +74,14 @@ pub fn start<T: AsRef<str>, E: Engine + Send + 'static >(endpoint: T, engine: E)
 
         let engine_thread = ::std::thread::spawn(move || {
             eprintln!("starting engine");
+            let (name, version) = { (engine.name(), engine.version()) };
             engine.start(
                 update_receiver,
                 Box::new(ZmqService::new(
                     validator_sender_clone,
                     ::std::time::Duration::from_secs(SERVICE_TIMEOUT),
-                    engine.name(),
-                    engine.version(),
+                    name,
+                    version,
                 )),
                 chain_head,
                 peers,
