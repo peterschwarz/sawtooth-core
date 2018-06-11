@@ -148,7 +148,7 @@ pub struct PeerMessage {
 /// Finally, as an optimization, the consensus engine can send prioritized lists of blocks to the
 /// chain controller for checking instead of sending them one at a time, which allows the chain
 /// controller to intelligently work ahead while the consensus engine makes its decisions.
-pub trait Engine: Send {
+pub trait Engine {
     /// Called after the engine is initialized, when a connection to the validator has been
     /// established. Notifications from the validator are sent along `updates`. `service` is used
     /// to send requests to the validator.
