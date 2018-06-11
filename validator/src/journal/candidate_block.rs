@@ -33,8 +33,7 @@ use pylogger;
 use scheduler::Scheduler;
 
 pub enum CandidateBlockError {
-    ConsensusNotReady,
-    NoPendingBatchesRemaining,
+    BlockEmpty,
 }
 
 pub struct FinalizeBlockResult {
@@ -331,7 +330,7 @@ impl CandidateBlock {
 
     pub fn finalize(&mut self, force: bool) -> Result<FinalizeBlockResult, CandidateBlockError> {
         if !(force || !self.pending_batches.is_empty()) {
-            return Err(CandidateBlockError::NoPendingBatchesRemaining);
+            return Err(CandidateBlockError::BlockEmpty);
         }
 
         self.scheduler.finalize(true).unwrap();
@@ -467,7 +466,7 @@ impl CandidateBlock {
                     .collect::<Vec<String>>(),
             })
         } else {
-            Err(CandidateBlockError::NoPendingBatchesRemaining)
+            Err(CandidateBlockError::BlockEmpty)
         }
     }
 }

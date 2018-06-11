@@ -46,15 +46,13 @@ lazy_static! {
 
 #[derive(Debug)]
 pub enum InitializeBlockError {
-    ConsensusNotReady,
-    InvalidState,
+    BlockInProgress,
 }
 
 #[derive(Debug)]
 pub enum FinalizeBlockError {
-    ConsensusNotReady,
-    NoPendingBatchesRemaining,
-    InvalidState,
+    BlockNotInitialized,
+    BlockEmpty,
 }
 
 #[derive(Debug)]
@@ -211,7 +209,7 @@ impl SyncBlockPublisher {
     ) -> Result<(), InitializeBlockError> {
         if state.candidate_block.is_some() {
             warn!("Tried to initialize block but block already initialized");
-            return Err(InitializeBlockError::InvalidState);
+            return Err(InitializeBlockError::BlockInProgress);
         }
         let mut candidate_block = {
             let gil = Python::acquire_gil();
@@ -318,15 +316,10 @@ impl SyncBlockPublisher {
                     state.candidate_block = None;
                     Ok(finalize_result)
                 }
-                Err(err) => Err(match err {
-                    CandidateBlockError::ConsensusNotReady => FinalizeBlockError::ConsensusNotReady,
-                    CandidateBlockError::NoPendingBatchesRemaining => {
-                        FinalizeBlockError::NoPendingBatchesRemaining
-                    }
-                }),
+                Err(err) => Err(FinalizeBlockError::BlockNotInitialized),
             }
         } else {
-            Err(FinalizeBlockError::InvalidState)
+            Err(FinalizeBlockError::BlockNotInitialized)
         }
     }
 
@@ -412,7 +405,7 @@ impl SyncBlockPublisher {
             let chain_head = state.chain_head.clone().unwrap();
             match self.initialize_block(&mut state, &chain_head) {
                 _ => {}
-                Err(InitializeBlockError::InvalidState) => {
+                Err(InitializeBlockError::BlockInProgress) => {
                     warn!("Tried to initialize block but block already initialized.")
                 }
             }
