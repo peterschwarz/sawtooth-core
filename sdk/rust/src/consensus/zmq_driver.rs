@@ -27,12 +27,14 @@ use messaging::stream::MessageConnection;
 use messaging::stream::MessageSender;
 use messaging::stream::ReceiveError;
 use messaging::stream::SendError;
-use messaging::zmq_stream::ZmqMessageConnection;
+use messaging::zmq_stream::{ZmqMessageConnection, ZmqMessageSender};
 
 use messages::consensus::*;
 use messages::validator::{Message, Message_MessageType};
 
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, channel, Receiver, RecvTimeoutError, Sender};
+use std::thread;
+use std::time::Duration;
 
 const REGISTER_TIMEOUT: u64 = 300;
 const SERVICE_TIMEOUT: u64 = 300;
@@ -43,94 +45,58 @@ fn generate_correlation_id() -> String {
     rand::thread_rng().gen_ascii_chars().take(LENGTH).collect()
 }
 
-pub fn start<T: AsRef<str>, E: Engine + Send + 'static >(endpoint: T, engine: E) -> (Stop, Receiver<Error>) {
-    let validator_connection = ZmqMessageConnection::new(endpoint.as_ref());
-    let (mut validator_sender, validator_receiver) = validator_connection.create();
+pub struct ZmqDriver {
+    stop_receiver: Receiver<()>,
+}
 
-    let validator_sender_clone = validator_sender.clone();
-    let (mut update_sender, update_receiver) = channel();
+impl ZmqDriver {
+    /// Create a new ZMQ-based Consensus Engine driver and a handle for stopping it
+    pub fn new() -> (Self, Stop) {
+        let (stop_sender, stop_receiver) = channel();
+        let stop = Stop { sender: stop_sender };
+        let driver = ZmqDriver {
+            stop_receiver,
+        };
+        (driver, stop)
+    }
 
-    let (stop_sender, stop_receiver) = channel();
-    let stop = Stop { sender: stop_sender };
+    /// Start the driver with the given engine, consuming both
+    ///
+    /// The engine's start method will be run from the current thread and this method should block
+    /// until the engine shutsdown.
+    pub fn start<T: AsRef<str>, E: Engine>(self, endpoint: T, mut engine: E) -> Result<(), Error> {
+        let validator_connection = ZmqMessageConnection::new(endpoint.as_ref());
+        let (mut validator_sender, validator_receiver) = validator_connection.create();
 
-    let (error_sender, error_receiver): (Sender<Error>, Receiver<Error>) = channel();
+        let validator_sender_clone = validator_sender.clone();
+        let (update_sender, update_receiver) = channel();
 
-    ::std::thread::spawn(move || {
-
-        let (chain_head, peers) = match register(
+        let (chain_head, peers) = register(
             &mut validator_sender,
-            ::std::time::Duration::from_secs(REGISTER_TIMEOUT),
+            Duration::from_secs(REGISTER_TIMEOUT),
             engine.name(),
             engine.version(),
-        ) {
-            Ok(ok) => ok,
-            Err(err) => {
-                error_sender
-                    .send(err.into())
-                    .unwrap_or_else(|err| warn!("Failed to send error: {:?}", err));
-                return;
-            }
-        };
+        )?;
 
-        let engine_thread = ::std::thread::spawn(move || {
-            eprintln!("starting engine");
-            engine.start(
-                update_receiver,
-                Box::new(ZmqService::new(
-                    validator_sender_clone,
-                    ::std::time::Duration::from_secs(SERVICE_TIMEOUT),
-                    engine.name(),
-                    engine.version(),
-                )),
-                chain_head,
-                peers,
-            );
+        let driver_thread = thread::spawn(move || {
+            driver_loop(update_sender, self.stop_receiver, validator_sender, validator_receiver)
         });
 
-        loop {
-            match validator_receiver.recv_timeout(::std::time::Duration::from_millis(100)) {
-                Err(RecvTimeoutError::Timeout) => {
-                    if let Ok(_) = stop_receiver.try_recv() {
-                        debug!("Sending shutdown to engine");
-                        if let Err(err) = update_sender.send(Update::Shutdown) {
-                            error_sender
-                                .send(err.into())
-                                .unwrap_or_else(|err| warn!("Failed to send error: {:?}", err));
-                            break;
-                        }
-                    }
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    error!("Sender disconnected");
-                    break;
-                }
-                Ok(Err(err)) => {
-                    error!("Unexpected error while receiving: {}", err);
-                    break;
-                }
-                Ok(Ok(msg)) => {
-                    if let Err(err) = handle_update(&msg, &mut validator_sender, &mut update_sender) {
-                        error_sender
-                            .send(err.into())
-                            .unwrap_or_else(|err| error!("Failed to send error: {:?}", err));
-                    }
-                    if let Ok(_) = stop_receiver.try_recv() {
-                        debug!("Sending shutdown to engine");
-                        if let Err(err) = update_sender.send(Update::Shutdown) {
-                            error_sender
-                                .send(err.into())
-                                .unwrap_or_else(|err| error!("Failed to send error: {:?}", err));
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        let (name, version) = { (engine.name(), engine.version()) };
+        engine.start(
+            update_receiver,
+            Box::new(ZmqService::new(
+                validator_sender_clone,
+                Duration::from_secs(SERVICE_TIMEOUT),
+                name,
+                version,
+            )),
+            chain_head,
+            peers,
+        );
 
-        engine_thread.join().expect("Engine panicked");
-    });
-
-    (stop, error_receiver)
+        driver_thread.join().expect("Driver panicked")
+    }
 }
 
 /// Utility class for signaling that the driver should be shutdown
@@ -146,9 +112,42 @@ impl Stop {
     }
 }
 
+fn driver_loop(
+    mut update_sender: Sender<Update>,
+    stop_receiver: Receiver<()>,
+    mut validator_sender: ZmqMessageSender,
+    validator_receiver: Receiver<Result<Message, ReceiveError>>,
+) -> Result<(), Error> {
+    loop {
+        match validator_receiver.recv_timeout(Duration::from_millis(100)) {
+            Err(RecvTimeoutError::Timeout) => {
+                if let Ok(_) = stop_receiver.try_recv() {
+                    update_sender.send(Update::Shutdown)?;
+                    break Ok(());
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                break Err(Error::ReceiveError("Sender disconnected".into()));
+            }
+            Ok(Err(err)) => {
+                break Err(Error::ReceiveError(format!("Unexpected error while receiving: {}", err)));
+            }
+            Ok(Ok(msg)) => {
+                if let Err(err) = handle_update(&msg, &mut validator_sender, &mut update_sender) {
+                    break Err(err);
+                }
+                if let Ok(_) = stop_receiver.try_recv() {
+                    update_sender.send(Update::Shutdown)?;
+                    break Ok(());
+                }
+            }
+        }
+    }
+}
+
 pub fn register(
     sender: &mut MessageSender,
-    timeout: ::std::time::Duration,
+    timeout: Duration,
     name: String,
     version: String
 ) -> Result<(Block, Vec<PeerInfo>), Error> {
@@ -327,8 +326,8 @@ impl From<SendError> for Error {
     }
 }
 
-impl From<::std::sync::mpsc::SendError<Update>> for Error {
-    fn from(error: ::std::sync::mpsc::SendError<Update>) -> Error {
+impl From<mpsc::SendError<Update>> for Error {
+    fn from(error: mpsc::SendError<Update>) -> Error {
         Error::SendError(format!("{}", error))
     }
 }
@@ -343,7 +342,7 @@ impl From<ReceiveError> for Error {
 mod tests {
     use super::*;
     use consensus::engine::tests::MockEngine;
-    use std::sync::{mpsc::TryRecvError, Arc, Mutex};
+    use std::sync::{Arc, Mutex};
     use zmq;
 
     fn send_req_rep<I: protobuf::Message, O: protobuf::Message>(
@@ -393,14 +392,6 @@ mod tests {
         (connection_id, request)
     }
 
-    fn assert_no_errors(errors: &mut Receiver<Error>) {
-        match errors.try_recv() {
-            Ok(err) => panic!("{:?}", err),
-            Err(TryRecvError::Empty) => (),
-            Err(TryRecvError::Disconnected) => panic!("Disconnect"),
-        }
-    }
-
     #[test]
     fn test_zmq_driver() {
         let ctx = zmq::Context::new();
@@ -417,10 +408,12 @@ mod tests {
         // We are going to run two threads to simulate the validator and the driver
         let mock_engine = MockEngine::with(calls.clone());
 
-        eprintln!("starting");
-        let (stop, mut errors) = start(&addr, mock_engine);
+        let (driver, stop) = ZmqDriver::new();
 
-        eprintln!("registering");
+        let driver_thread = thread::spawn(move || {
+            driver.start(&addr, mock_engine)
+        });
+
         let mut response = ConsensusRegisterResponse::new();
         response.set_status(ConsensusRegisterResponse_Status::OK);
         let (connection_id, request): (_, ConsensusRegisterRequest) = recv_rep(
@@ -431,7 +424,6 @@ mod tests {
         );
         assert!("mock" == request.get_name());
         assert!("0" == request.get_version());
-        { assert_no_errors(&mut errors); }
 
         let _: ConsensusNotifyAck = send_req_rep(
             &connection_id,
@@ -491,7 +483,10 @@ mod tests {
 
         // Shut it down
         stop.stop();
-        { assert_no_errors(&mut errors); }
+        driver_thread
+            .join()
+            .expect("Driver thread panicked")
+            .expect("Driver thread returned an error");
 
         // Assert we did what we expected
         let final_calls = calls.lock().unwrap();
