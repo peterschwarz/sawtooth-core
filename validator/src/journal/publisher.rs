@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, SendError, Sender};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use execution::execution_platform::ExecutionPlatform;
 use execution::py_executor::PyExecutor;
@@ -397,35 +397,6 @@ impl SyncBlockPublisher {
         }
     }
 
-    pub fn on_check_publish_block(&mut self, force: bool) {
-        let mut state = self.state
-            .write()
-            .expect("RwLock was poisoned during a write lock");
-        if !self.is_building_block(&state) && self.can_build_block(&state) {
-            let chain_head = state.chain_head.clone().unwrap();
-            match self.initialize_block(&mut state, &chain_head) {
-                _ => {}
-                Err(InitializeBlockError::BlockInProgress) => {
-                    warn!("Tried to initialize block but block already initialized.")
-                }
-            }
-        }
-
-        if self.is_building_block(&state) {
-            if let Ok(result) = self.finalize_block(&mut state, force) {
-                if result.block.is_some() {
-                    self.publish_block(
-                        &mut state,
-                        result.block.unwrap(),
-                        result.injected_batch_ids,
-                    );
-                } else {
-                    debug!("FinalizeBlockResult.block was None");
-                }
-            }
-        }
-    }
-
     fn cancel_block(&self, state: &mut BlockPublisherState) {
         let mut candidate_block = None;
         mem::swap(&mut state.candidate_block, &mut candidate_block);
@@ -504,10 +475,9 @@ impl BlockPublisher {
     pub fn start(&mut self) {
         let builder = thread::Builder::new().name("PublisherThread".into());
         let mut batch_rx = self.batch_rx.take().unwrap();
-        let mut block_publisher = self.publisher.clone();
+        let block_publisher = self.publisher.clone();
         builder
             .spawn(move || {
-                let mut now = Instant::now();
                 let check_period = { block_publisher.check_publish_block_frequency };
                 loop {
                     // Receive and process a batch
@@ -522,13 +492,6 @@ impl BlockPublisher {
                         },
                         Ok(batch) => {
                             block_publisher.on_batch_received(batch);
-                        }
-                    }
-                    if now.elapsed() >= check_period {
-                        block_publisher.on_check_publish_block(false);
-                        now = Instant::now();
-                        if block_publisher.exit.get() {
-                            break;
                         }
                     }
                 }
