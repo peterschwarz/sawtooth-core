@@ -178,9 +178,7 @@ pub struct ChainController<BC: BlockCache, BV: BlockValidator> {
     chain_head_lock: ChainHeadLock,
 }
 
-impl<BC: BlockCache + 'static, BV: BlockValidator + 'static>
-    ChainController<BC, BV>
-{
+impl<BC: BlockCache + 'static, BV: BlockValidator + 'static> ChainController<BC, BV> {
     pub fn new(
         block_cache: BC,
         block_validator: BV,
@@ -561,9 +559,7 @@ trait StopHandle: Clone {
     fn stop(&self);
 }
 
-impl<BC: BlockCache + 'static, BV: BlockValidator + 'static>
-    ChainThread<BC, BV>
-{
+impl<BC: BlockCache + 'static, BV: BlockValidator + 'static> ChainThread<BC, BV> {
     fn new(
         chain_controller: ChainController<BC, BV>,
         block_queue: Receiver<BlockWrapper>,

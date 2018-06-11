@@ -128,9 +128,7 @@ pub extern "C" fn chain_controller_drop(chain_controller: *mut c_void) -> ErrorC
     check_null!(chain_controller);
 
     unsafe {
-        Box::from_raw(
-            chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator>,
-        )
+        Box::from_raw(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator>)
     };
     ErrorCode::Success
 }
@@ -140,8 +138,7 @@ pub extern "C" fn chain_controller_start(chain_controller: *mut c_void) -> Error
     check_null!(chain_controller);
 
     unsafe {
-        (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator>))
-            .start();
+        (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator>)).start();
     }
 
     ErrorCode::Success
@@ -152,8 +149,7 @@ pub extern "C" fn chain_controller_stop(chain_controller: *mut c_void) -> ErrorC
     check_null!(chain_controller);
 
     unsafe {
-        (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator>))
-            .stop();
+        (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator>)).stop();
     }
     ErrorCode::Success
 }
@@ -174,8 +170,7 @@ pub extern "C" fn chain_controller_has_block(
     };
 
     unsafe {
-        *result = (*(chain_controller
-            as *mut ChainController<PyBlockCache, PyBlockValidator>))
+        *result = (*(chain_controller as *mut ChainController<PyBlockCache, PyBlockValidator>))
             .has_block(block_id);
     }
 
