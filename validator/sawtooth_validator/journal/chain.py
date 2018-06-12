@@ -43,6 +43,7 @@ class ChainController(OwnedPointer):
         block_validator,
         state_database,
         chain_head_lock,
+        consensus_notifier,
         state_pruning_block_depth=1000,
         data_dir=None,
         observers=None
@@ -62,6 +63,7 @@ class ChainController(OwnedPointer):
             ctypes.py_object(block_validator),
             state_database.pointer,
             chain_head_lock.pointer,
+            ctypes.py_object(consensus_notifier),
             ctypes.py_object(observers),
             ctypes.c_long(state_pruning_block_depth),
             ctypes.c_char_p(data_dir.encode()),
@@ -80,6 +82,18 @@ class ChainController(OwnedPointer):
                  self.pointer, ctypes.c_char_p(block_id.encode()),
                  ctypes.byref(result))
         return result.value
+
+    def ignore_block(self, block):
+        _pylibexec('chain_controller_ignore_block', self.pointer,
+                   ctypes.py_object(block))
+
+    def fail_block(self, block):
+        _pylibexec('chain_controller_fail_block', self.pointer,
+                   ctypes.py_object(block))
+
+    def commit_block(self, block):
+        _pylibexec('chain_controller_commit_block', self.pointer,
+                   ctypes.py_object(block))
 
     def queue_block(self, block):
         _pylibexec('chain_controller_queue_block', self.pointer,

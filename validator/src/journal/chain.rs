@@ -127,6 +127,13 @@ pub trait ChainWriter: Send + Sync {
     ) -> Result<(), ChainControllerError>;
 }
 
+pub trait ConsensusNotifier: Send + Sync {
+    fn notify_block_new(&self, block: &BlockWrapper);
+    fn notify_block_valid(&self, block_id: &str);
+    fn notify_block_invalid(&self, block_id: &str);
+    fn notify_block_commit(&self, block_id: &str);
+}
+
 /// Holds the results of Block Validation.
 struct ForkResolutionResult<'a> {
     pub block: &'a BlockWrapper,
@@ -411,6 +418,10 @@ fn get_batch_commit_changes(
 pub struct ChainController<BC: BlockCache, BV: BlockValidator> {
     state: Arc<RwLock<ChainControllerState<BC, BV>>>,
     stop_handle: Arc<Mutex<Option<ChainThreadStopHandle>>>,
+
+    consensus_notifier: Arc<ConsensusNotifier>,
+
+    // Queues
     block_queue_sender: Option<Sender<BlockWrapper>>,
     commit_queue_sender: Option<Sender<BlockWrapper>>,
     validation_result_sender: Option<Sender<BlockWrapper>>,
@@ -426,6 +437,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static> ChainController<BC,
         chain_writer: Box<ChainWriter>,
         chain_reader: Box<ChainReader>,
         chain_head_lock: ChainHeadLock,
+        consensus_notifier: Box<ConsensusNotifier>,
         data_dir: String,
         state_pruning_block_depth: u32,
         observers: Vec<Box<ChainObserver>>,
@@ -448,6 +460,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static> ChainController<BC,
             validation_result_sender: None,
             state_pruning_block_depth,
             chain_head_lock,
+            consensus_notifier: Arc::from(consensus_notifier),
         };
 
         chain_controller.initialize_chain_head();
@@ -484,7 +497,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static> ChainController<BC,
         }
 
         state.block_cache.put(block.clone());
-        self.submit_blocks_for_verification(&state.block_validator, &[block])?;
+        self.consensus_notifier.notify_block_new(&block);
         Ok(())
     }
 
@@ -661,6 +674,7 @@ impl<BC: BlockCache + 'static, BV: BlockValidator + 'static> ChainController<BC,
             validation_result_sender: self.validation_result_sender.clone(),
             state_pruning_block_depth: self.state_pruning_block_depth,
             chain_head_lock: self.chain_head_lock.clone(),
+            consensus_notifier: self.consensus_notifier.clone(),
         }
     }
 
