@@ -127,6 +127,38 @@ pub trait ChainWriter: Send + Sync {
     ) -> Result<(), ChainControllerError>;
 }
 
+/// Holds the results of Block Validation.
+struct ForkResolutionResult<'a> {
+    pub block: &'a BlockWrapper,
+    pub chain_head: &'a Option<BlockWrapper>,
+
+    pub new_chain: Vec<BlockWrapper>,
+    pub current_chain: Vec<BlockWrapper>,
+
+    pub committed_batches: Vec<Batch>,
+    pub uncommitted_batches: Vec<Batch>,
+
+    pub transaction_count: usize,
+}
+
+impl<'a> ForkResolutionResult<'a> {
+    fn new(block: &'a BlockWrapper) -> Self {
+        ForkResolutionResult {
+            block,
+            chain_head: &None,
+            new_chain: vec![],
+            current_chain: vec![],
+            committed_batches: vec![],
+            uncommitted_batches: vec![],
+            transaction_count: 0,
+        }
+    }
+}
+
+/// Indication that an error occured during fork resolution.
+#[derive(Debug)]
+struct ForkResolutionError(String);
+
 struct ChainControllerState<BC: BlockCache, BV: BlockValidator> {
     block_cache: BC,
     block_validator: BV,
