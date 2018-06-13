@@ -253,12 +253,6 @@ class BlockPublisher(OwnedPointer):
 
         return (c_length.value, c_limit.value)
 
-    def on_check_publish_block(self, force=False):
-
-        self._py_call(
-            'on_check_publish_block',
-            ctypes.c_bool(force))
-
     def on_batch_received(self, batch):
         self._py_call(
             'on_batch_received',
