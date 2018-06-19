@@ -33,7 +33,7 @@ from sawtooth_poet_common.protobuf.validator_registry_pb2 \
 from sawtooth_poet_common.protobuf.validator_registry_pb2 \
     import SignUpInfo
 
-from sawtooth_validator.journal.block_wrapper import NULL_BLOCK_IDENTIFIER
+from sawtooth_poet.journal.block_wrapper import NULL_BLOCK_IDENTIFIER
 
 from test_consensus.utils import create_random_public_key_hash
 
