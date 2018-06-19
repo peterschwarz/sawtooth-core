@@ -300,7 +300,6 @@ class Validator(object):
             data_dir=data_dir,
             config_dir=config_dir,
             permission_verifier=permission_verifier,
-            check_publish_block_frequency=0.1,
             batch_observers=[batch_tracker],
             batch_injector_factory=batch_injector_factory)
 
@@ -321,6 +320,7 @@ class Validator(object):
             block_validator=block_validator,
             state_database=global_state_db,
             chain_head_lock=block_publisher.chain_head_lock,
+            consensus_notifier=consensus_notifier,
             state_pruning_block_depth=state_pruning_block_depth,
             data_dir=data_dir,
             observers=[
@@ -404,14 +404,14 @@ class Validator(object):
     def start(self):
         self._component_dispatcher.start()
         self._component_service.start()
-        self._consensus_dispatcher.start()
-        self._consensus_service.start()
         if self._genesis_controller.requires_genesis():
             self._genesis_controller.start(self._start)
         else:
             self._start()
 
     def _start(self):
+        self._consensus_dispatcher.start()
+        self._consensus_service.start()
         self._network_dispatcher.start()
         self._network_service.start()
 
