@@ -25,8 +25,8 @@ from sawtooth_sdk.processor.config import get_log_dir
 from sawtooth_sdk.consensus.zmq_driver import ZmqDriver
 from sawtooth_poet_engine.engine import PoetEngine
 
-from sawtooth_validator.config.path import load_path_config
-from sawtooth_validator.exceptions import LocalConfigurationError
+from sawtooth_poet.config.path import load_path_config
+from sawtooth_poet.exceptions import LocalConfigurationError
 
 DISTRIBUTION_NAME = 'sawtooth-poet'
 

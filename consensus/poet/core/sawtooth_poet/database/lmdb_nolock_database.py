@@ -17,12 +17,12 @@ import os
 import lmdb
 import cbor
 
-from sawtooth_validator.database import database
+from sawtooth_poet.database import database
 
 
 class LMDBNoLockDatabase(database.Database):
     """LMDBNoLockDatabase is an implementation of the
-    sawtooth_validator.database.Database interface which uses LMDB for the
+    sawtooth_poet.database.Database interface which uses LMDB for the
     underlying persistence.
 
     Attributes:
