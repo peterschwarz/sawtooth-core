@@ -86,13 +86,13 @@ def main(args=None):
 
         if log_config is not None:
             log_configuration(log_config=log_config)
-            if log_config.get('root') is not None:
-                init_console_logging(verbose_level=opts.verbose)
         else:
             log_dir = get_log_dir()
             log_configuration(
                 log_dir=log_dir,
                 name='poet-engine')
+
+        init_console_logging(verbose_level=opts.verbose)
 
         driver = ZmqDriver(
             PoetEngine(
