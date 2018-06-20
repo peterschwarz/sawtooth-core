@@ -391,3 +391,15 @@ services:
       - 4004
     command: settings-tp -C tcp://validator-3:4004
     stop_signal: SIGKILL
+
+  settings-tp-4:
+    build:
+      context: ../../..
+      dockerfile: ./families/settings/Dockerfile
+    image: sawtooth-settings-tp$INSTALL_TYPE:$ISOLATION_ID
+    volumes:
+      - $SAWTOOTH_CORE:/project/sawtooth-core
+    expose:
+      - 4004
+    command: settings-tp -C tcp://validator-4:4004
+    stop_signal: SIGKILL
