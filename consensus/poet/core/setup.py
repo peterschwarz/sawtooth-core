@@ -32,6 +32,7 @@ setup(name='sawtooth-poet-core',
           'sawtooth-poet-common',
           'sawtooth-poet-simulator',
           'sawtooth-signing',
-          'sawtooth-validator',
+          'cbor',
+          'lmdb',
       ],
       entry_points={})
