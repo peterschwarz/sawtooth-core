@@ -20,7 +20,7 @@ import sys
 
 import toml
 
-from sawtooth_validator.exceptions import LocalConfigurationError
+from sawtooth_poet.exceptions import LocalConfigurationError
 
 
 LOGGER = logging.getLogger(__name__)
