@@ -20,6 +20,7 @@ import logging
 
 from sawtooth_sdk.processor.log import init_console_logging
 from sawtooth_sdk.processor.log import log_configuration
+from sawtooth_sdk.processor.config import get_log_config
 from sawtooth_sdk.processor.config import get_log_dir
 
 from sawtooth_sdk.consensus.zmq_driver import ZmqDriver
