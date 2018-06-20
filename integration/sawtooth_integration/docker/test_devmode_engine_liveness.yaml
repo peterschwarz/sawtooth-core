@@ -57,35 +57,35 @@ services:
     image: sawtooth-dev-rust:$ISOLATION_ID
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
-    command: devmode-rust --connect tcp://validator-0:5005 -vv
+    command: devmode-rust --connect tcp://validator-0:5050 -vv
     stop_signal: SIGKILL
 
   devmode-engine-1:
     image: sawtooth-dev-rust:$ISOLATION_ID
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
-    command: devmode-rust --connect tcp://validator-1:5005 -vv
+    command: devmode-rust --connect tcp://validator-1:5050 -vv
     stop_signal: SIGKILL
 
   devmode-engine-2:
     image: sawtooth-dev-rust:$ISOLATION_ID
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
-    command: devmode-rust --connect tcp://validator-2:5005 -vv
+    command: devmode-rust --connect tcp://validator-2:5050 -vv
     stop_signal: SIGKILL
 
   devmode-engine-3:
     image: sawtooth-dev-rust:$ISOLATION_ID
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
-    command: devmode-rust --connect tcp://validator-3:5005 -vv
+    command: devmode-rust --connect tcp://validator-3:5050 -vv
     stop_signal: SIGKILL
 
   devmode-engine-4:
     image: sawtooth-dev-rust:$ISOLATION_ID
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
-    command: devmode-rust --connect tcp://validator-4:5005 -vv
+    command: devmode-rust --connect tcp://validator-4:5050 -vv
     stop_signal: SIGKILL
 
   validator-0:
@@ -98,7 +98,7 @@ services:
     expose:
       - 4004
       - 8800
-      - 5005
+      - 5050
     working_dir: /root
     command: "bash -c \"\
         sawadm keygen && \
@@ -117,7 +117,7 @@ services:
             --endpoint tcp://validator-0:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
-            --bind consensus:tcp://eth0:5005 \
+            --bind consensus:tcp://eth0:5050 \
             --peering dynamic \
             --scheduler parallel \
     \""
@@ -133,14 +133,14 @@ services:
     expose:
       - 4004
       - 8800
-      - 5005
+      - 5050
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
             --endpoint tcp://validator-1:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
-            --bind consensus:tcp://eth0:5005 \
+            --bind consensus:tcp://eth0:5050 \
             --peering dynamic \
             --seeds tcp://validator-0:8800 \
             --scheduler parallel \
@@ -157,14 +157,14 @@ services:
     expose:
       - 4004
       - 8800
-      - 5005
+      - 5050
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
             --endpoint tcp://validator-2:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
-            --bind consensus:tcp://eth0:5005 \
+            --bind consensus:tcp://eth0:5050 \
             --peering dynamic \
             --seeds tcp://validator-0:8800 \
             --scheduler parallel \
@@ -181,14 +181,14 @@ services:
     expose:
       - 4004
       - 8800
-      - 5005
+      - 5050
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
             --endpoint tcp://validator-3:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
-            --bind consensus:tcp://eth0:5005 \
+            --bind consensus:tcp://eth0:5050 \
             --peering dynamic \
             --seeds tcp://validator-0:8800 \
             --scheduler parallel \
@@ -205,14 +205,14 @@ services:
     expose:
       - 4004
       - 8800
-      - 5005
+      - 5050
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
             --endpoint tcp://validator-4:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
-            --bind consensus:tcp://eth0:5005 \
+            --bind consensus:tcp://eth0:5050 \
             --peering dynamic \
             --seeds tcp://validator-0:8800 \
             --scheduler parallel \

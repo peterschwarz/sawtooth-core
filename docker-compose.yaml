@@ -52,7 +52,7 @@ services:
         cd sdk/examples/poet_python
         python3 setup.py clean --all
         python3 setup.py build
-        poet-python -vv -C tcp://validator:5005 --component tcp://validator:4004
+        poet-engine -vv -C tcp://validator:5050 --component tcp://validator:4004
       "
     stop_signal: SIGKILL
 
