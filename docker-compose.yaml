@@ -36,14 +36,14 @@ services:
       "
     stop_signal: SIGKILL
 
-  poet-python:
+  poet-engine:
     build:
       context: .
       dockerfile: sdk/examples/poet_python/Dockerfile
-    image: poet-python-local:${ISOLATION_ID}
+    image: poet-engine-local:${ISOLATION_ID}
     volumes:
       - ./:/project/sawtooth-core
-    container_name: poet-python-local
+    container_name: poet-engine-local
     depends_on:
       - validator
     command: |

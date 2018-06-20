@@ -21,7 +21,7 @@ After=network.target
 User=sawtooth
 Group=sawtooth
 EnvironmentFile=-/etc/default/sawtooth-poet-engine
-ExecStart=/usr/bin/poet-python $SAWTOOTH_POET_ENGINE_ARGS
+ExecStart=/usr/bin/poet-engine $SAWTOOTH_POET_ENGINE_ARGS
 Restart=on-failure
 RestartSec=15
 

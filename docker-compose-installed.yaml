@@ -36,15 +36,15 @@ services:
       - validator
     entrypoint: intkey-tp-python -vv -C tcp://validator:4004
 
-  poet-python:
+  poet-engine:
     build:
       context: .
       dockerfile: sdk/examples/poet_python/Dockerfile-installed
-    image: sawtooth-poet-python:${ISOLATION_ID}
-    container_name: sawtooth-poet-python-default
+    image: sawtooth-poet-engine:${ISOLATION_ID}
+    container_name: sawtooth-poet-engine-default
     depends_on:
       - validator
-    entrypoint: poet-python -vv -C tcp://validator:5050 --component tcp://validator:4004
+    entrypoint: poet-engine -vv -C tcp://validator:5050 --component tcp://validator:4004
 
   xo-tp-python:
     build:
