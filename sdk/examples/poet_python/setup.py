@@ -43,6 +43,7 @@ setup(
     install_requires=[
         "cbor",
         "colorlog",
+        "cryptography",
         "sawtooth-sdk",
         "sawtooth-signing",
         "sawtooth-poet-core",
