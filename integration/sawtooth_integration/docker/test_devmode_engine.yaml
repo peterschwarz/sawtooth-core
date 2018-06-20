@@ -85,7 +85,7 @@ services:
     expose:
       - 4004
       - 8800
-      - 5005
+      - 5050
     working_dir: /root
     command: "bash -c \"\
         sawadm keygen && \
@@ -104,7 +104,7 @@ services:
             --endpoint tcp://validator-0:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
-            --bind consensus:tcp://eth0:5005 \
+            --bind consensus:tcp://eth0:5050 \
             --peering dynamic \
             --scheduler parallel \
     \""
@@ -120,14 +120,14 @@ services:
     expose:
       - 4004
       - 8800
-      - 5005
+      - 5050
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
             --endpoint tcp://validator-1:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
-            --bind consensus:tcp://eth0:5005 \
+            --bind consensus:tcp://eth0:5050 \
             --peering dynamic \
             --seeds tcp://validator-0:8800 \
             --scheduler parallel \
@@ -144,14 +144,14 @@ services:
     expose:
       - 4004
       - 8800
-      - 5005
+      - 5050
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
             --endpoint tcp://validator-2:8800 \
             --bind component:tcp://eth0:4004 \
             --bind network:tcp://eth0:8800 \
-            --bind consensus:tcp://eth0:5005 \
+            --bind consensus:tcp://eth0:5050 \
             --peering dynamic \
             --seeds tcp://validator-0:8800 \
             --scheduler parallel \
@@ -166,7 +166,7 @@ services:
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
     working_dir: /project/sawtooth-core/sdk/examples/devmode_rust
-    command: devmode-rust --connect tcp://validator-0:5005 -v
+    command: devmode-rust --connect tcp://validator-0:5050 -v
     stop_signal: SIGKILL
 
   devmode-1:
@@ -177,7 +177,7 @@ services:
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
     working_dir: /project/sawtooth-core/sdk/examples/devmode_rust
-    command: devmode-rust --connect tcp://validator-1:5005 -v
+    command: devmode-rust --connect tcp://validator-1:5050 -v
     stop_signal: SIGKILL
 
   devmode-2:
@@ -188,7 +188,7 @@ services:
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
     working_dir: /project/sawtooth-core/sdk/examples/devmode_rust
-    command: devmode-rust --connect tcp://validator-2:5005 -v
+    command: devmode-rust --connect tcp://validator-2:5050 -v
     stop_signal: SIGKILL
 
   rest-api-0:
