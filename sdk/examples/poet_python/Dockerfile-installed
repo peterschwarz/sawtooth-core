@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# docker build -f consensus/poet/core/Dockerfile-installed -t sawtooth-poet-core .
+# docker build -f sdk/examples/poet_python/Dockerfile-installed -t sawtooth-poet-engine-installed .
 
 # -------------=== signing build ===-------------
 FROM ubuntu:xenial as sawtooth-signing-builder
@@ -174,9 +174,9 @@ RUN dpkg -i /tmp/python3-sawtooth*.deb || true \
  && python3 setup.py --command-packages=stdeb.command debianize \
  && if [ -d "packaging/ubuntu" ]; then cp -R packaging/ubuntu/* debian/; fi \
  && dpkg-buildpackage -b -rfakeroot -us -uc
-# -------------=== python poet engine build ===-------------
+# -------------=== poet engine build ===-------------
 
-FROM ubuntu:xenial as python-poet-engine-builder
+FROM ubuntu:xenial as poet-engine-builder
 
 ENV VERSION=AUTO_STRICT
 
@@ -216,7 +216,7 @@ FROM ubuntu:xenial
 COPY --from=sawtooth-signing-builder /project/python3-sawtooth-signing*.deb /tmp
 COPY --from=sawtooth-sdk-python-builder /project/sdk/python3-sawtooth-sdk*.deb /tmp
 COPY --from=poet-core-builder /project/consensus/poet/python3-sawtooth-poet-core*.deb /tmp
-COPY --from=python-poet-engine-builder /project/sdk/examples/python3-sawtooth-poet*.deb /tmp
+COPY --from=poet-engine-builder /project/sdk/examples/python3-sawtooth-poet*.deb /tmp
 COPY --from=poet-common-builder /project/consensus/poet/python3-sawtooth-poet-common*.deb /tmp
 COPY --from=sawtooth-simulator-builder /project/consensus/poet/python3-sawtooth-poet-simulator*.deb /tmp
 

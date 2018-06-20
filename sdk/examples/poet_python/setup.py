@@ -53,6 +53,6 @@ setup(
     data_files=data_files,
     entry_points={
         'console_scripts': [
-            'poet-python = sawtooth_poet_engine.main:main'
+            'poet-engine = sawtooth_poet_engine.main:main'
         ]
     })
