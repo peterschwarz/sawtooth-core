@@ -62,19 +62,13 @@ class PoetEngine(Engine):
 
         initialize = self._oracle.initialize_block(header)
 
-        LOGGER.info('PoET initialization: %s', initialize)
-
         if initialize:
             self._service.initialize_block()
 
         return initialize
 
     def _check_consensus(self, block):
-        verify = self._oracle.verify_block(block)
-
-        LOGGER.debug('PoET verification: %s', verify)
-
-        return verify
+        return self._oracle.verify_block(block)
 
     def _switch_forks(self, current_head, new_head):
         try:
@@ -83,9 +77,7 @@ class PoetEngine(Engine):
         # e.g. when it encounters non-PoET blocks.
         except TypeError as err:
             switch = False
-            LOGGER.warning('PoET fork error: %s', err)
-
-        LOGGER.debug('PoET switch forks: %s', switch)
+            LOGGER.warning('PoET fork resolution error: %s', err)
 
         return switch
 
@@ -130,7 +122,7 @@ class PoetEngine(Engine):
                 time.sleep(1)
                 continue
             else:
-                LOGGER.info('summary: %s', summary)
+                LOGGER.info('Block summary: %s', summary)
                 break
 
         consensus = self._oracle.finalize_block(summary)
@@ -156,11 +148,7 @@ class PoetEngine(Engine):
 
     def _check_publish_block(self):
         # Publishing is based solely on wait time, so just give it None.
-        publish = self._oracle.check_publish_block(None)
-
-        LOGGER.debug('PoET publishing: %s', publish)
-
-        return publish
+        return self._oracle.check_publish_block(None)
 
     def start(self, updates, service, chain_head, peers):
         self._service = service
@@ -207,19 +195,16 @@ class PoetEngine(Engine):
 
     def _try_to_publish(self):
         if self._published:
-            LOGGER.debug('already published at this height')
             return
 
         if not self._building:
-            LOGGER.debug('not building: attempting to initialize')
             if self._initialize_block():
                 self._building = True
 
         if self._building:
-            LOGGER.debug('building: attempting to publish')
             if self._check_publish_block():
-                LOGGER.debug('finalizing block')
-                self._finalize_block()
+                block_id = self._finalize_block()
+                LOGGER.info("Published block %s", block_id)
                 self._published = True
                 self._building = False
 
