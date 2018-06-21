@@ -206,7 +206,7 @@ services:
     stop_signal: SIGKILL
 
   poet-0:
-    image: poet-python-local:$ISOLATION_ID
+    image: poet-engine-local:$ISOLATION_ID
     build:
       context: ../../..
       dockerfile: ./sdk/examples/poet_python/Dockerfile
@@ -214,14 +214,14 @@ services:
       - $SAWTOOTH_CORE:/project/sawtooth-core
       - sawtooth-keys-0:/etc/sawtooth/keys
       - sawtooth-db-0:/var/lib/sawtooth
-    command: poet-python --connect tcp://validator-0:5005 --component tcp://validator-0:4004 -vv
+    command: poet-engine --connect tcp://validator-0:5050 --component tcp://validator-0:4004 -vv
     stop_signal: SIGKILL
     environment:
       PYTHONPATH: "/project/sawtooth-core/sdk/python:\
         /project/sawtooth-core/signing:"
 
   poet-1:
-    image: poet-python-local:$ISOLATION_ID
+    image: poet-engine-local:$ISOLATION_ID
     build:
       context: ../../..
       dockerfile: ./sdk/examples/poet_python/Dockerfile
@@ -229,14 +229,14 @@ services:
       - $SAWTOOTH_CORE:/project/sawtooth-core
       - sawtooth-keys-1:/etc/sawtooth/keys
       - sawtooth-db-1:/var/lib/sawtooth
-    command: poet-python --connect tcp://validator-1:5005 --component tcp://validator-1:4004 -vv
+    command: poet-engine --connect tcp://validator-1:5050 --component tcp://validator-1:4004 -vv
     stop_signal: SIGKILL
     environment:
       PYTHONPATH: "/project/sawtooth-core/sdk/python:\
         /project/sawtooth-core/signing:"
 
   poet-2:
-    image: poet-python-local:$ISOLATION_ID
+    image: poet-engine-local:$ISOLATION_ID
     build:
       context: ../../..
       dockerfile: ./sdk/examples/poet_python/Dockerfile
@@ -244,14 +244,14 @@ services:
       - $SAWTOOTH_CORE:/project/sawtooth-core
       - sawtooth-keys-2:/etc/sawtooth/keys
       - sawtooth-db-2:/var/lib/sawtooth
-    command: poet-python --connect tcp://validator-2:5005 --component tcp://validator-2:4004 -vv
+    command: poet-engine --connect tcp://validator-2:5050 --component tcp://validator-2:4004 -vv
     stop_signal: SIGKILL
     environment:
       PYTHONPATH: "/project/sawtooth-core/sdk/python:\
         /project/sawtooth-core/signing:"
 
   poet-3:
-    image: poet-python-local:$ISOLATION_ID
+    image: poet-engine-local:$ISOLATION_ID
     build:
       context: ../../..
       dockerfile: ./sdk/examples/poet_python/Dockerfile
@@ -259,14 +259,14 @@ services:
       - $SAWTOOTH_CORE:/project/sawtooth-core
       - sawtooth-keys-3:/etc/sawtooth/keys
       - sawtooth-db-3:/var/lib/sawtooth
-    command: poet-python --connect tcp://validator-3:5005 --component tcp://validator-3:4004 -vv
+    command: poet-engine --connect tcp://validator-3:5050 --component tcp://validator-3:4004 -vv
     stop_signal: SIGKILL
     environment:
       PYTHONPATH: "/project/sawtooth-core/sdk/python:\
         /project/sawtooth-core/signing:"
 
   poet-4:
-    image: poet-python-local:$ISOLATION_ID
+    image: poet-engine-local:$ISOLATION_ID
     build:
       context: ../../..
       dockerfile: ./sdk/examples/poet_python/Dockerfile
@@ -274,7 +274,7 @@ services:
       - $SAWTOOTH_CORE:/project/sawtooth-core
       - sawtooth-keys-4:/etc/sawtooth/keys
       - sawtooth-db-4:/var/lib/sawtooth
-    command: poet-python --connect tcp://validator-4:5005 --component tcp://validator-4:4004 -vv
+    command: poet-engine --connect tcp://validator-4:5050 --component tcp://validator-4:4004 -vv
     stop_signal: SIGKILL
     environment:
       PYTHONPATH: "/project/sawtooth-core/sdk/python:\

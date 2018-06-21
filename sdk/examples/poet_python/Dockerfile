@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# docker build -f sdk/examples/poet_python/Dockerfile -t poet-python-local .
+# docker build -f sdk/examples/poet_python/Dockerfile -t sawtooth-poet-engine-local .
 
-# -------------=== poet-python build ===-------------
+# -------------=== poet engine build ===-------------
 
 FROM ubuntu:xenial
 
@@ -48,7 +48,7 @@ ENV PATH=$PATH:/project/sawtooth-core/bin
 
 WORKDIR /project/sawtooth-core
 
-CMD echo "\033[0;32m--- Building poet-python ---\n\033[0m" \
+CMD echo "\033[0;32m--- Building poet engine ---\n\033[0m" \
  && bin/protogen \
  && cd sdk/examples/poet_python \
  && python3 setup.py clean --all \

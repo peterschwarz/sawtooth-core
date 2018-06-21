@@ -25,12 +25,12 @@ data_files = []
 
 if os.path.exists("/etc/default"):
     data_files.append(
-        ('/etc/default', ['packaging/systemd/sawtooth-poet-python']))
+        ('/etc/default', ['packaging/systemd/sawtooth-poet-engine']))
 
 if os.path.exists("/lib/systemd/system"):
     data_files.append(
         ('/lib/systemd/system',
-         ['packaging/systemd/sawtooth-poet-python.service']))
+         ['packaging/systemd/sawtooth-poet-engine.service']))
 
 setup(
     name='sawtooth-poet-engine',
@@ -53,6 +53,6 @@ setup(
     data_files=data_files,
     entry_points={
         'console_scripts': [
-            'poet-python = sawtooth_poet_engine.main:main'
+            'poet-engine = sawtooth_poet_engine.main:main'
         ]
     })

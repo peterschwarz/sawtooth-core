@@ -13,4 +13,4 @@
 # limitations under the License.
 # ------------------------------------------------------------------------------
 
-SAWTOOTH_INTKEY_TP_PYTHON_ARGS=-v -C tcp://localhost:5005 --component tcp://localhost:4004
+SAWTOOTH_POET_ENGINE_ARGS=-v -C tcp://localhost:5050 --component tcp://localhost:4004

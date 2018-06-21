@@ -14,14 +14,14 @@
 # -----------------------------------------------------------------------------
 
 [Unit]
-Description=Sawtooth Validator Server
+Description=Sawtooth PoET Engine
 After=network.target
 
 [Service]
 User=sawtooth
 Group=sawtooth
-EnvironmentFile=-/etc/default/sawtooth-poet-python
-ExecStart=/usr/bin/poet-python $SAWTOOTH_POET_PYTHON_ARGS
+EnvironmentFile=-/etc/default/sawtooth-poet-engine
+ExecStart=/usr/bin/poet-engine $SAWTOOTH_POET_ENGINE_ARGS
 Restart=on-failure
 RestartSec=15
 
