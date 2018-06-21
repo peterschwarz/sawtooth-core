@@ -182,12 +182,14 @@ class PoetEngine(Engine):
             except queue.Empty:
                 pass
             else:
-                LOGGER.debug('Received message: %s', type_tag)
+                LOGGER.debug('Received message: %s',
+                             Message.MessageType.Name(type_tag))
 
                 try:
                     handle_message = handlers[type_tag]
                 except KeyError:
-                    LOGGER.error('Unknown type tag: %s', type_tag)
+                    LOGGER.error('Unknown type tag: %s',
+                                 Message.MessageType.Name(type_tag))
                 else:
                     handle_message(data)
 
