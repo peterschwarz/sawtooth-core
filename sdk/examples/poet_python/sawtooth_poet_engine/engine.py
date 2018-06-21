@@ -118,13 +118,16 @@ class PoetEngine(Engine):
             return None
 
     def _finalize_block(self):
-        summary = self._summarize_block()
+        summary = None
+        while summary is None:
+            summary = self._summarize_block()
 
-        if summary is None:
-            LOGGER.warning('No summary available')
-            return None
-        else:
-            LOGGER.info('summary: %s', summary)
+            if summary is None:
+                LOGGER.warning('Summary not available yet')
+                continue
+            else:
+                LOGGER.info('summary: %s', summary)
+                break
 
         consensus = self._oracle.finalize_block(summary)
 
