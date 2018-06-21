@@ -118,13 +118,16 @@ class PoetEngine(Engine):
             return None
 
     def _finalize_block(self):
-        summary = self._summarize_block()
+        summary = None
+        while summary is None:
+            summary = self._summarize_block()
 
-        if summary is None:
-            LOGGER.warning('No summary available')
-            return None
-        else:
-            LOGGER.info('summary: %s', summary)
+            if summary is None:
+                LOGGER.warning('Summary not available yet')
+                continue
+            else:
+                LOGGER.info('summary: %s', summary)
+                break
 
         consensus = self._oracle.finalize_block(summary)
 
@@ -179,12 +182,14 @@ class PoetEngine(Engine):
             except queue.Empty:
                 pass
             else:
-                LOGGER.debug('Received message: %s', type_tag)
+                LOGGER.debug('Received message: %s',
+                             Message.MessageType.Name(type_tag))
 
                 try:
                     handle_message = handlers[type_tag]
                 except KeyError:
-                    LOGGER.error('Unknown type tag: %s', type_tag)
+                    LOGGER.error('Unknown type tag: %s',
+                                 Message.MessageType.Name(type_tag))
                 else:
                     handle_message(data)
 
