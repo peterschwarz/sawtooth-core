@@ -67,19 +67,24 @@ class ZmqDriver(Driver):
         driver_thread.join()
 
     def _driver_loop(self):
-        while True:
-            if self._exit:
-                self._engine.stop()
-                break
+        try:
+            future = self._stream.receive()
+            while True:
+                if self._exit:
+                    self._engine.stop()
+                    break
 
-            try:
-                message = self._stream.receive().result(10)
-            except concurrent.futures.TimeoutError:
-                continue
+                try:
+                    message = future.result(1)
+                    future = self._stream.receive()
+                except concurrent.futures.TimeoutError:
+                    continue
 
-            result = self._process(message)
+                result = self._process(message)
 
-            self._updates.put(result)
+                self._updates.put(result)
+        except: # pylint: disable=broad-except
+            LOGGER.exception("Uncaught driver exception")
 
     def stop(self):
         self._exit = True

@@ -17,11 +17,14 @@ import logging
 import queue
 import time
 
+import json
+
 from sawtooth_sdk.consensus.engine import Engine
 from sawtooth_sdk.consensus import exceptions
 from sawtooth_sdk.protobuf.validator_pb2 import Message
 
 from sawtooth_poet_engine.oracle import PoetOracle, PoetBlock, NewBlockHeader
+from sawtooth_poet_engine.pending import PendingForks
 
 
 LOGGER = logging.getLogger(__name__)
@@ -41,7 +44,7 @@ class PoetEngine(Engine):
         self._building = False
         self._committing = False
 
-        self._pending_blocks = queue.Queue()
+        self._pending_forks_to_resolve = PendingForks()
 
     def name(self):
         return 'PoET'
@@ -59,19 +62,13 @@ class PoetEngine(Engine):
 
         initialize = self._oracle.initialize_block(header)
 
-        LOGGER.info('PoET initialization: %s', initialize)
-
         if initialize:
             self._service.initialize_block()
 
         return initialize
 
     def _check_consensus(self, block):
-        verify = self._oracle.verify_block(block)
-
-        LOGGER.debug('PoET verification: %s', verify)
-
-        return verify
+        return self._oracle.verify_block(block)
 
     def _switch_forks(self, current_head, new_head):
         try:
@@ -80,9 +77,7 @@ class PoetEngine(Engine):
         # e.g. when it encounters non-PoET blocks.
         except TypeError as err:
             switch = False
-            LOGGER.warning('PoET fork error: %s', err)
-
-        LOGGER.debug('PoET switch forks: %s', switch)
+            LOGGER.warning('PoET fork resolution error: %s', err)
 
         return switch
 
@@ -123,10 +118,11 @@ class PoetEngine(Engine):
             summary = self._summarize_block()
 
             if summary is None:
-                LOGGER.warning('Summary not available yet')
+                LOGGER.debug('Block not ready to be summarized')
+                time.sleep(1)
                 continue
             else:
-                LOGGER.info('summary: %s', summary)
+                LOGGER.info('Block summary: %s', summary)
                 break
 
         consensus = self._oracle.finalize_block(summary)
@@ -137,10 +133,13 @@ class PoetEngine(Engine):
         while True:
             try:
                 block_id = self._service.finalize_block(consensus)
-                LOGGER.info('finalized %s with %s', block_id, consensus)
+                LOGGER.info(
+                    'Finalized %s with %s',
+                    block_id.hex(),
+                    json.loads(consensus.decode()))
                 return block_id
             except exceptions.BlockNotReady:
-                LOGGER.warning('block not ready')
+                LOGGER.debug('Block not ready to be finalized')
                 time.sleep(1)
                 continue
             except exceptions.InvalidState:
@@ -149,11 +148,7 @@ class PoetEngine(Engine):
 
     def _check_publish_block(self):
         # Publishing is based solely on wait time, so just give it None.
-        publish = self._oracle.check_publish_block(None)
-
-        LOGGER.debug('PoET publishing: %s', publish)
-
-        return publish
+        return self._oracle.check_publish_block(None)
 
     def start(self, updates, service, chain_head, peers):
         self._service = service
@@ -196,26 +191,22 @@ class PoetEngine(Engine):
             if self._exit:
                 break
 
-            ##########
+            self._try_to_publish()
 
-            # publisher activity #
+    def _try_to_publish(self):
+        if self._published:
+            return
 
-            if self._published:
-                LOGGER.debug('already published at this height')
-                continue
+        if not self._building:
+            if self._initialize_block():
+                self._building = True
 
-            if not self._building:
-                LOGGER.debug('not building: attempting to initialize')
-                if self._initialize_block():
-                    self._building = True
-
-            if self._building:
-                LOGGER.debug('building: attempting to publish')
-                if self._check_publish_block():
-                    LOGGER.debug('finalizing block')
-                    self._finalize_block()
-                    self._published = True
-                    self._building = False
+        if self._building:
+            if self._check_publish_block():
+                block_id = self._finalize_block()
+                LOGGER.info("Published block %s", block_id)
+                self._published = True
+                self._building = False
 
     def _handle_new_block(self, block):
         block = PoetBlock(block)
@@ -232,23 +223,20 @@ class PoetEngine(Engine):
     def _handle_valid_block(self, block_id):
         block = self._get_block(block_id)
 
+        self._pending_forks_to_resolve.push(block)
+
+        self._process_pending_forks()
+
+    def _process_pending_forks(self):
+        while not self._committing:
+            block = self._pending_forks_to_resolve.pop()
+            if block is None:
+                break
+
+            self._resolve_fork(block)
+
+    def _resolve_fork(self, block):
         chain_head = self._get_chain_head()
-
-        if self._committing:
-            LOGGER.info(
-                'Waiting for block to be committed before resolving fork')
-            self._pending_blocks.put(block)
-            return
-
-        try:
-            queued_block = self._pending_blocks.get(timeout=1)
-        except queue.Empty:
-            LOGGER.debug('No pending blocks')
-            pass
-        else:
-            LOGGER.debug('Handling pending block')
-            self._pending_blocks.put(block)
-            block = queued_block
 
         LOGGER.info(
             'Choosing between chain heads -- current: %s -- new: %s',
@@ -263,15 +251,15 @@ class PoetEngine(Engine):
             LOGGER.info('Ignoring %s', block)
             self._ignore_block(block.block_id)
 
-    def _handle_committed_block(self, _block_id):
-        chain_head = self._get_chain_head()
-
+    def _handle_committed_block(self, block_id):
         LOGGER.info(
             'Chain head updated to %s, abandoning block in progress',
-            chain_head.block_id)
+            block_id)
 
         self._cancel_block()
 
         self._building = False
         self._published = False
         self._committing = False
+
+        self._process_pending_forks()
