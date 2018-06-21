@@ -127,7 +127,8 @@ services:
     \""
     stop_signal: SIGKILL
     environment:
-      PYTHONPATH: "/project/sawtooth-core/sdk/python"
+      PYTHONPATH: "/project/sawtooth-core/sdk/python:\
+        /project/sawtooth-core/families/block_info"
 
   validator-1:
     build:
@@ -147,6 +148,8 @@ services:
         sawtooth-validator -v
     \""
     stop_signal: SIGKILL
+    environment:
+      PYTHONPATH: "/project/sawtooth-core/families/block_info"
 
   validator-2:
     build:
@@ -166,6 +169,8 @@ services:
         sawtooth-validator -v
     \""
     stop_signal: SIGKILL
+    environment:
+      PYTHONPATH: "/project/sawtooth-core/families/block_info"
 
   validator-3:
     build:
@@ -185,6 +190,8 @@ services:
         sawtooth-validator -v
     \""
     stop_signal: SIGKILL
+    environment:
+      PYTHONPATH: "/project/sawtooth-core/families/block_info"
 
   validator-4:
     build:
@@ -204,6 +211,8 @@ services:
         sawtooth-validator -v
     \""
     stop_signal: SIGKILL
+    environment:
+      PYTHONPATH: "/project/sawtooth-core/families/block_info"
 
   poet-0:
     image: poet-engine-local:$ISOLATION_ID
