@@ -17,6 +17,8 @@ import logging
 import queue
 import time
 
+import json
+
 from sawtooth_sdk.consensus.engine import Engine
 from sawtooth_sdk.consensus import exceptions
 from sawtooth_sdk.protobuf.validator_pb2 import Message
@@ -139,7 +141,10 @@ class PoetEngine(Engine):
         while True:
             try:
                 block_id = self._service.finalize_block(consensus)
-                LOGGER.info('finalized %s with %s', block_id, consensus)
+                LOGGER.info(
+                    'Finalized %s with %s',
+                    block_id.hex(),
+                    json.loads(consensus.decode()))
                 return block_id
             except exceptions.BlockNotReady:
                 LOGGER.warning('block not ready')
