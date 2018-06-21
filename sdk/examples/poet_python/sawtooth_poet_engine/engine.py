@@ -126,7 +126,7 @@ class PoetEngine(Engine):
             summary = self._summarize_block()
 
             if summary is None:
-                LOGGER.warning('Summary not available yet')
+                LOGGER.debug('Block not ready to be summarized')
                 time.sleep(1)
                 continue
             else:
@@ -147,7 +147,7 @@ class PoetEngine(Engine):
                     json.loads(consensus.decode()))
                 return block_id
             except exceptions.BlockNotReady:
-                LOGGER.warning('block not ready')
+                LOGGER.debug('Block not ready to be finalized')
                 time.sleep(1)
                 continue
             except exceptions.InvalidState:
