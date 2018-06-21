@@ -22,6 +22,7 @@ from sawtooth_sdk.consensus import exceptions
 from sawtooth_sdk.protobuf.validator_pb2 import Message
 
 from sawtooth_poet_engine.oracle import PoetOracle, PoetBlock, NewBlockHeader
+from sawtooth_poet_engine.pending import PendingForks
 
 
 LOGGER = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class PoetEngine(Engine):
         self._building = False
         self._committing = False
 
-        self._pending_blocks = queue.Queue()
+        self._pending_forks_to_resolve = PendingForks()
 
     def name(self):
         return 'PoET'
@@ -231,23 +232,20 @@ class PoetEngine(Engine):
     def _handle_valid_block(self, block_id):
         block = self._get_block(block_id)
 
+        self._pending_forks_to_resolve.push(block)
+
+        self._process_pending_forks()
+
+    def _process_pending_forks(self):
+        while not self._committing:
+            block = self._pending_forks_to_resolve.pop()
+            if block is None:
+                break
+
+            self._resolve_fork(block)
+
+    def _resolve_fork(self, block):
         chain_head = self._get_chain_head()
-
-        if self._committing:
-            LOGGER.info(
-                'Waiting for block to be committed before resolving fork')
-            self._pending_blocks.put(block)
-            return
-
-        try:
-            queued_block = self._pending_blocks.get(timeout=1)
-        except queue.Empty:
-            LOGGER.debug('No pending blocks')
-            pass
-        else:
-            LOGGER.debug('Handling pending block')
-            self._pending_blocks.put(block)
-            block = queued_block
 
         LOGGER.info(
             'Choosing between chain heads -- current: %s -- new: %s',
@@ -274,3 +272,5 @@ class PoetEngine(Engine):
         self._building = False
         self._published = False
         self._committing = False
+
+        self._process_pending_forks()
