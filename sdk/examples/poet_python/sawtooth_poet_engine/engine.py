@@ -125,6 +125,7 @@ class PoetEngine(Engine):
 
             if summary is None:
                 LOGGER.warning('Summary not available yet')
+                time.sleep(1)
                 continue
             else:
                 LOGGER.info('summary: %s', summary)
