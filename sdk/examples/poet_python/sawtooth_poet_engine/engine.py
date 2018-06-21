@@ -196,26 +196,25 @@ class PoetEngine(Engine):
             if self._exit:
                 break
 
-            ##########
+            self._try_to_publish()
 
-            # publisher activity #
+    def _try_to_publish(self):
+        if self._published:
+            LOGGER.debug('already published at this height')
+            return
 
-            if self._published:
-                LOGGER.debug('already published at this height')
-                continue
+        if not self._building:
+            LOGGER.debug('not building: attempting to initialize')
+            if self._initialize_block():
+                self._building = True
 
-            if not self._building:
-                LOGGER.debug('not building: attempting to initialize')
-                if self._initialize_block():
-                    self._building = True
-
-            if self._building:
-                LOGGER.debug('building: attempting to publish')
-                if self._check_publish_block():
-                    LOGGER.debug('finalizing block')
-                    self._finalize_block()
-                    self._published = True
-                    self._building = False
+        if self._building:
+            LOGGER.debug('building: attempting to publish')
+            if self._check_publish_block():
+                LOGGER.debug('finalizing block')
+                self._finalize_block()
+                self._published = True
+                self._building = False
 
     def _handle_new_block(self, block):
         block = PoetBlock(block)
