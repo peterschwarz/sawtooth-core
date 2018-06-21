@@ -260,12 +260,10 @@ class PoetEngine(Engine):
             LOGGER.info('Ignoring %s', block)
             self._ignore_block(block.block_id)
 
-    def _handle_committed_block(self, _block_id):
-        chain_head = self._get_chain_head()
-
+    def _handle_committed_block(self, block_id):
         LOGGER.info(
             'Chain head updated to %s, abandoning block in progress',
-            chain_head.block_id)
+            block_id)
 
         self._cancel_block()
 
