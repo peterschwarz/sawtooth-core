@@ -284,7 +284,7 @@ class BlockPublisher(OwnedPointer):
             ctypes.c_bool(force),
             ctypes.byref(c_result), ctypes.byref(c_result_len))
 
-        return ffi.from_c_bytes(c_result, c_result_len).decode()
+        return ffi.from_c_bytes(c_result, c_result_len)
 
     def initialize_block(self, block):
         self._py_call("initialize_block", ctypes.py_object(block))
