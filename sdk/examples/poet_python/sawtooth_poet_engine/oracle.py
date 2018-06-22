@@ -131,12 +131,18 @@ class PoetBlock:
         self.state_root_hash = block.block_id
 
     def __str__(self):
-        return ' | '.join([
-            'block_num: {}'.format(self.block_num),
-            'identifier: {}'.format(self.identifier),
-            'previous_block_id: {}'.format(self.previous_block_id),
-            'consensus: {}'.format(self.payload)
-        ])
+        return (
+            "Block("
+            + ", ".join([
+                "block_num: {}".format(self.block_num),
+                "block_id: {}".format(self.block_id.hex()),
+                "previous_id: {}".format(self.previous_id.hex()),
+                "signer_id: {}".format(self.signer_id.hex()),
+                "payload: {}".format(self.payload),
+                "summary: {}".format(self.summary.hex()),
+            ])
+            + ")"
+        )
 
 
 class NewBlockHeader:
