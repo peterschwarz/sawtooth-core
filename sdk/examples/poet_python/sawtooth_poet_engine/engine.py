@@ -58,9 +58,7 @@ class PoetEngine(Engine):
     def _initialize_block(self):
         chain_head = self._get_chain_head()
 
-        header = NewBlockHeader(chain_head)
-
-        initialize = self._oracle.initialize_block(header)
+        initialize = self._oracle.initialize_block(chain_head)
 
         if initialize:
             self._service.initialize_block()
@@ -122,7 +120,7 @@ class PoetEngine(Engine):
                 time.sleep(1)
                 continue
             else:
-                LOGGER.info('Block summary: %s', summary)
+                LOGGER.info('Block summary: %s', summary.hex())
                 break
 
         consensus = self._oracle.finalize_block(summary)
@@ -204,20 +202,19 @@ class PoetEngine(Engine):
         if self._building:
             if self._check_publish_block():
                 block_id = self._finalize_block()
-                LOGGER.info("Published block %s", block_id)
+                LOGGER.info("Published block %s", block_id.hex())
                 self._published = True
                 self._building = False
 
     def _handle_new_block(self, block):
         block = PoetBlock(block)
-
-        LOGGER.info('Checking consensus data: %s', block)
+        LOGGER.info('Received %s', block)
 
         if self._check_consensus(block):
-            LOGGER.info('Passed consensus check: %s', block)
+            LOGGER.info('Passed consensus check: %s', block.block_id.hex())
             self._check_block(block.block_id)
         else:
-            LOGGER.info('Failed consensus check: %s', block)
+            LOGGER.info('Failed consensus check: %s', block.block_id.hex())
             self._fail_block(block.block_id)
 
     def _handle_valid_block(self, block_id):
@@ -240,21 +237,21 @@ class PoetEngine(Engine):
 
         LOGGER.info(
             'Choosing between chain heads -- current: %s -- new: %s',
-            chain_head,
-            block)
+            chain_head.block_id.hex(),
+            block.block_id.hex())
 
         if self._switch_forks(chain_head, block):
-            LOGGER.info('Committing %s', block)
+            LOGGER.info('Committing %s', block.block_id.hex())
             self._commit_block(block.block_id)
             self._committing = True
         else:
-            LOGGER.info('Ignoring %s', block)
+            LOGGER.info('Ignoring %s', block.block_id.hex())
             self._ignore_block(block.block_id)
 
     def _handle_committed_block(self, block_id):
         LOGGER.info(
             'Chain head updated to %s, abandoning block in progress',
-            block_id)
+            block_id.hex())
 
         self._cancel_block()
 

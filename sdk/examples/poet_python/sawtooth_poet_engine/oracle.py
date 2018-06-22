@@ -34,6 +34,8 @@ from sawtooth_sdk.protobuf.batch_pb2 import Batch
 from sawtooth_sdk.protobuf.batch_pb2 import BatchHeader
 from sawtooth_sdk.protobuf.client_batch_submit_pb2 \
     import ClientBatchSubmitRequest
+from sawtooth_sdk.protobuf.client_batch_submit_pb2 \
+    import ClientBatchSubmitResponse
 from sawtooth_sdk.protobuf.client_block_pb2 \
     import ClientBlockGetByTransactionIdRequest
 from sawtooth_sdk.protobuf.client_block_pb2 \
@@ -63,7 +65,11 @@ class PoetOracle:
 
         self._batch_publisher = _BatchPublisherProxy(stream, self._signer)
 
-    def initialize_block(self, block):
+    def initialize_block(self, previous_block):
+        block_header = NewBlockHeader(
+            previous_block,
+            self._signer.get_public_key().as_hex())
+
         self._publisher = PoetBlockPublisher(
             block_cache=self._block_cache,
             state_view_factory=self._state_view_factory,
@@ -72,7 +78,7 @@ class PoetOracle:
             config_dir=self._config_dir,
             validator_id=self._validator_id)
 
-        return self._publisher.initialize_block(block)
+        return self._publisher.initialize_block(block_header)
 
     def check_publish_block(self, block):
         return self._publisher.check_publish_block(block)
@@ -131,21 +137,27 @@ class PoetBlock:
         self.state_root_hash = block.block_id
 
     def __str__(self):
-        return ' | '.join([
-            'block_num: {}'.format(self.block_num),
-            'identifier: {}'.format(self.identifier),
-            'previous_block_id: {}'.format(self.previous_block_id),
-            'consensus: {}'.format(self.payload)
-        ])
+        return (
+            "Block("
+            + ", ".join([
+                "block_num: {}".format(self.block_num),
+                "block_id: {}".format(self.block_id.hex()),
+                "previous_id: {}".format(self.previous_id.hex()),
+                "signer_id: {}".format(self.signer_id.hex()),
+                "payload: {}".format(self.payload),
+                "summary: {}".format(self.summary.hex()),
+            ])
+            + ")"
+        )
 
 
 class NewBlockHeader:
-    '''The header for the block that block that is to be initialized.'''
-    def __init__(self, block):
+    '''The header for the block that is to be initialized.'''
+    def __init__(self, previous_block, signer_public_key):
         self.consensus = None
-        self.signer_public_key = block.signer_public_key
-        self.previous_block_id = block.identifier
-        self.block_num = block.block_num + 1
+        self.signer_public_key = signer_public_key
+        self.previous_block_id = previous_block.identifier
+        self.block_num = previous_block.block_num + 1
 
 
 class _DummyHeader:
@@ -285,10 +297,17 @@ class _BatchPublisherProxy:
             transactions=transactions,
             header_signature=signature)
 
-        self._stream.send(
+        future = self._stream.send(
             message_type=Message.CLIENT_BATCH_SUBMIT_REQUEST,
             content=ClientBatchSubmitRequest(
                 batches=[batch]).SerializeToString())
+
+        result = future.result()
+        assert result.message_type == Message.CLIENT_BATCH_SUBMIT_RESPONSE
+        response = ClientBatchSubmitResponse()
+        response.ParseFromString(result.content)
+        if response.status != ClientBatchSubmitResponse.OK:
+            LOGGER.warn("Submitting batch failed with status %s", response)
 
 
 def _load_identity_signer(key_dir, key_name):
