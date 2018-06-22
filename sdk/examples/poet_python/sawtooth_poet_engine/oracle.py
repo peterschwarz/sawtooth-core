@@ -34,6 +34,8 @@ from sawtooth_sdk.protobuf.batch_pb2 import Batch
 from sawtooth_sdk.protobuf.batch_pb2 import BatchHeader
 from sawtooth_sdk.protobuf.client_batch_submit_pb2 \
     import ClientBatchSubmitRequest
+from sawtooth_sdk.protobuf.client_batch_submit_pb2 \
+    import ClientBatchSubmitResponse
 from sawtooth_sdk.protobuf.client_block_pb2 \
     import ClientBlockGetByTransactionIdRequest
 from sawtooth_sdk.protobuf.client_block_pb2 \
@@ -295,10 +297,17 @@ class _BatchPublisherProxy:
             transactions=transactions,
             header_signature=signature)
 
-        self._stream.send(
+        future = self._stream.send(
             message_type=Message.CLIENT_BATCH_SUBMIT_REQUEST,
             content=ClientBatchSubmitRequest(
                 batches=[batch]).SerializeToString())
+
+        result = future.result()
+        assert result.message_type == Message.CLIENT_BATCH_SUBMIT_RESPONSE
+        response = ClientBatchSubmitResponse()
+        response.ParseFromString(result.content)
+        if response.status != ClientBatchSubmitResponse.OK:
+            LOGGER.warn("Submitting batch failed with status %s", response)
 
 
 def _load_identity_signer(key_dir, key_name):
