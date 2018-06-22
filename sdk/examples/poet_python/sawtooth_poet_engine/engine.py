@@ -58,9 +58,7 @@ class PoetEngine(Engine):
     def _initialize_block(self):
         chain_head = self._get_chain_head()
 
-        header = NewBlockHeader(chain_head)
-
-        initialize = self._oracle.initialize_block(header)
+        initialize = self._oracle.initialize_block(chain_head)
 
         if initialize:
             self._service.initialize_block()

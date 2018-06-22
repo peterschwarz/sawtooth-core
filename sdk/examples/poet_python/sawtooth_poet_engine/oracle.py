@@ -63,7 +63,11 @@ class PoetOracle:
 
         self._batch_publisher = _BatchPublisherProxy(stream, self._signer)
 
-    def initialize_block(self, block):
+    def initialize_block(self, previous_block):
+        block_header = NewBlockHeader(
+            previous_block,
+            self._signer.get_public_key().as_hex())
+
         self._publisher = PoetBlockPublisher(
             block_cache=self._block_cache,
             state_view_factory=self._state_view_factory,
@@ -72,7 +76,7 @@ class PoetOracle:
             config_dir=self._config_dir,
             validator_id=self._validator_id)
 
-        return self._publisher.initialize_block(block)
+        return self._publisher.initialize_block(block_header)
 
     def check_publish_block(self, block):
         return self._publisher.check_publish_block(block)
@@ -146,12 +150,12 @@ class PoetBlock:
 
 
 class NewBlockHeader:
-    '''The header for the block that block that is to be initialized.'''
-    def __init__(self, block):
+    '''The header for the block that is to be initialized.'''
+    def __init__(self, previous_block, signer_public_key):
         self.consensus = None
-        self.signer_public_key = block.signer_public_key
-        self.previous_block_id = block.identifier
-        self.block_num = block.block_num + 1
+        self.signer_public_key = signer_public_key
+        self.previous_block_id = previous_block.identifier
+        self.block_num = previous_block.block_num + 1
 
 
 class _DummyHeader:
