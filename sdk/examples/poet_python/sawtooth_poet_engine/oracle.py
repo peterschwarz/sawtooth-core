@@ -201,6 +201,9 @@ class _BlockStoreProxy:
         response = ClientBlockGetResponse()
         response.ParseFromString(content)
 
+        if response.status == ClientBlockGetResponse.NO_RESOURCE:
+            raise ValueError("The transaction supplied is not in a block")
+
         block = response.block
 
         header = BlockHeader()
