@@ -171,25 +171,28 @@ class PoetEngine(Engine):
 
         while True:
             try:
-                type_tag, data = updates.get(timeout=1)
-            except queue.Empty:
-                pass
-            else:
-                LOGGER.debug('Received message: %s',
-                             Message.MessageType.Name(type_tag))
-
                 try:
-                    handle_message = handlers[type_tag]
-                except KeyError:
-                    LOGGER.error('Unknown type tag: %s',
-                                 Message.MessageType.Name(type_tag))
+                    type_tag, data = updates.get(timeout=1)
+                except queue.Empty:
+                    pass
                 else:
-                    handle_message(data)
+                    LOGGER.debug('Received message: %s',
+                                 Message.MessageType.Name(type_tag))
 
-            if self._exit:
-                break
+                    try:
+                        handle_message = handlers[type_tag]
+                    except KeyError:
+                        LOGGER.error('Unknown type tag: %s',
+                                     Message.MessageType.Name(type_tag))
+                    else:
+                        handle_message(data)
 
-            self._try_to_publish()
+                if self._exit:
+                    break
+
+                self._try_to_publish()
+            except:
+                LOGGER.exception("Unhandled exception in message loop")
 
     def _try_to_publish(self):
         if self._published:
