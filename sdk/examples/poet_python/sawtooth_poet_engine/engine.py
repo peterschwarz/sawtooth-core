@@ -61,7 +61,7 @@ class PoetEngine(Engine):
         initialize = self._oracle.initialize_block(chain_head)
 
         if initialize:
-            self._service.initialize_block()
+            self._service.initialize_block(previous_id=chain_head.block_id)
 
         return initialize
 
