@@ -627,7 +627,7 @@ impl BlockPublisher {
 /// introduced by this must be filtered out later.
 pub fn make_batch_queue() -> (IncomingBatchSender, IncomingBatchReceiver) {
     let (sender, reciever) = channel();
-    let ids = Arc::new(Mutex::new(HashSet::new()));
+    let ids = Arc::new(RwLock::new(HashSet::new()));
     (
         IncomingBatchSender::new(ids.clone(), sender),
         IncomingBatchReceiver::new(ids, reciever),
@@ -635,13 +635,13 @@ pub fn make_batch_queue() -> (IncomingBatchSender, IncomingBatchReceiver) {
 }
 
 pub struct IncomingBatchReceiver {
-    ids: Arc<Mutex<HashSet<String>>>,
+    ids: Arc<RwLock<HashSet<String>>>,
     receiver: Receiver<Batch>,
 }
 
 impl IncomingBatchReceiver {
     pub fn new(
-        ids: Arc<Mutex<HashSet<String>>>,
+        ids: Arc<RwLock<HashSet<String>>>,
         receiver: Receiver<Batch>,
     ) -> IncomingBatchReceiver {
         IncomingBatchReceiver { ids, receiver }
@@ -650,7 +650,7 @@ impl IncomingBatchReceiver {
     pub fn get(&mut self, timeout: Duration) -> Result<Batch, BatchQueueError> {
         let batch = self.receiver.recv_timeout(timeout)?;
         self.ids
-            .lock()
+            .write()
             .expect("RwLock was poisoned during a write lock")
             .remove(&batch.header_signature);
         Ok(batch)
@@ -659,24 +659,20 @@ impl IncomingBatchReceiver {
 
 #[derive(Clone)]
 pub struct IncomingBatchSender {
-    ids: Arc<Mutex<HashSet<String>>>,
+    ids: Arc<RwLock<HashSet<String>>>,
     sender: Sender<Batch>,
 }
 
 impl IncomingBatchSender {
-    pub fn new(ids: Arc<Mutex<HashSet<String>>>, sender: Sender<Batch>) -> IncomingBatchSender {
+    pub fn new(ids: Arc<RwLock<HashSet<String>>>, sender: Sender<Batch>) -> IncomingBatchSender {
         IncomingBatchSender { ids, sender }
     }
     pub fn put(&mut self, batch: Batch) -> Result<(), BatchQueueError> {
-        if !self.ids
-            .lock()
-            .expect("RwLock was poisoned during a write lock")
-            .contains(&batch.header_signature)
-        {
-            self.ids
-                .lock()
-                .expect("RwLock was poisoned during a write lock")
-                .insert(batch.header_signature.clone());
+        let mut ids = self.ids.write()
+            .expect("RwLock was poisoned during a write lock");
+
+        if !ids.contains(&batch.header_signature) {
+            ids.insert(batch.header_signature.clone());
             self.sender.send(batch).map_err(BatchQueueError::from)
         } else {
             Ok(())
@@ -685,7 +681,7 @@ impl IncomingBatchSender {
 
     pub fn has_batch(&self, batch_id: &str) -> Result<bool, BatchQueueError> {
         Ok(self.ids
-            .lock()
+            .read()
             .expect("RwLock was poisoned during a write lock")
             .contains(batch_id))
     }
