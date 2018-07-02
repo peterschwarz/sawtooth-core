@@ -188,17 +188,16 @@ pub extern "C" fn block_publisher_on_batch_received(
             .extract::<Batch>(py)
             .unwrap()
     };
-    let publisher = unsafe {
-        (*(publisher as *mut BlockPublisher)).clone()
-    };
-    py.allow_threads(move ||
-        publisher.publisher.on_batch_received(batch)
-    );
+    let publisher = unsafe { (*(publisher as *mut BlockPublisher)).clone() };
+    py.allow_threads(move || publisher.publisher.on_batch_received(batch));
     ErrorCode::Success
 }
 
 #[no_mangle]
-pub extern "C" fn block_publisher_start(publisher: *mut c_void, incoming_batch_sender: *mut *const c_void) -> ErrorCode {
+pub extern "C" fn block_publisher_start(
+    publisher: *mut c_void,
+    incoming_batch_sender: *mut *const c_void,
+) -> ErrorCode {
     check_null!(publisher);
     let batch_tx = unsafe { (*(publisher as *mut BlockPublisher)).start() };
     let batch_tx_ptr: *mut IncomingBatchSender = Box::into_raw(Box::new(batch_tx));
@@ -257,10 +256,11 @@ pub extern "C" fn block_publisher_initialize_block(
             .unwrap()
     };
 
-    match unsafe { (*(publisher as *mut BlockPublisher)).initialize_block(block) } {
+    let publisher = unsafe { (*(publisher as *mut BlockPublisher)).clone() };
+    py.allow_threads(move || match publisher.initialize_block(block) {
         Err(InitializeBlockError::BlockInProgress) => ErrorCode::BlockInProgress,
         Ok(_) => ErrorCode::Success,
-    }
+    })
 }
 
 #[no_mangle]
@@ -358,9 +358,9 @@ pub extern "C" fn block_publisher_on_chain_updated(
         uncommitted_batches_ptr
     );
 
+    let gil = Python::acquire_gil();
+    let py = gil.python();
     let (chain_head, committed_batches, uncommitted_batches) = {
-        let gil = Python::acquire_gil();
-        let py = gil.python();
         convert_on_chain_updated_args(
             py,
             chain_head_ptr,
@@ -369,11 +369,14 @@ pub extern "C" fn block_publisher_on_chain_updated(
         )
     };
 
-    unsafe {
-        (*(publisher as *mut BlockPublisher))
-            .publisher
-            .on_chain_updated_internal(chain_head, committed_batches, uncommitted_batches);
-    };
+    let mut publisher = unsafe { (*(publisher as *mut BlockPublisher)).clone() };
+    py.allow_threads(move || {
+        publisher.publisher.on_chain_updated_internal(
+            chain_head,
+            committed_batches,
+            uncommitted_batches,
+        )
+    });
 
     ErrorCode::Success
 }
