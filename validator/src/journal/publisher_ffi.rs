@@ -16,6 +16,7 @@
  */
 use py_ffi;
 use std::ffi::CStr;
+use std::mem;
 use std::os::raw::{c_char, c_void};
 use std::slice;
 
@@ -280,6 +281,9 @@ pub extern "C" fn block_publisher_finalize_block(
         Ok(block_id) => unsafe {
             *result = block_id.as_ptr();
             *result_len = block_id.as_bytes().len();
+
+            mem::forget(block_id);
+
             ErrorCode::Success
         },
     }
@@ -300,6 +304,9 @@ pub extern "C" fn block_publisher_summarize_block(
         Ok(consensus) => unsafe {
             *result = consensus.as_ptr();
             *result_len = consensus.as_slice().len();
+
+            mem::forget(result);
+
             ErrorCode::Success
         },
     }
