@@ -24,7 +24,7 @@ use std::mem;
 use std::slice::Iter;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, SendError, Sender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -475,11 +475,9 @@ impl SyncBlockPublisher {
     }
 }
 
+#[derive(Clone)]
 pub struct BlockPublisher {
     pub publisher: SyncBlockPublisher,
-
-    batch_tx: IncomingBatchSender,
-    batch_rx: Option<IncomingBatchReceiver>,
 }
 
 impl BlockPublisher {
@@ -502,7 +500,6 @@ impl BlockPublisher {
         block_builder_class: PyObject,
         settings_view_class: PyObject,
     ) -> Self {
-        let (batch_tx, batch_rx) = make_batch_queue();
         let tep = Box::new(PyExecutor::new(transaction_executor).unwrap());
 
         let state = Arc::new(RwLock::new(BlockPublisherState::new(
@@ -534,14 +531,12 @@ impl BlockPublisher {
 
         BlockPublisher {
             publisher,
-            batch_tx,
-            batch_rx: Some(batch_rx),
         }
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> IncomingBatchSender {
+        let (batch_tx, mut batch_rx) = make_batch_queue();
         let builder = thread::Builder::new().name("PublisherThread".into());
-        let mut batch_rx = self.batch_rx.take().unwrap();
         let block_publisher = self.publisher.clone();
         builder
             .spawn(move || {
@@ -564,6 +559,8 @@ impl BlockPublisher {
                 warn!("PublisherThread exiting");
             })
             .unwrap();
+
+        batch_tx
     }
 
     pub fn cancel_block(&self) -> Result<(), CancelBlockError> {
@@ -582,10 +579,6 @@ impl BlockPublisher {
 
     pub fn chain_head_lock(&self) -> ChainHeadLock {
         ChainHeadLock::new(self.publisher.clone())
-    }
-
-    pub fn batch_sender(&self) -> IncomingBatchSender {
-        self.batch_tx.clone()
     }
 
     pub fn initialize_block(
@@ -627,13 +620,7 @@ impl BlockPublisher {
             .state
             .read()
             .expect("RwLock was poisoned during a write lock");
-        if state.pending_batches.contains(batch_id) {
-            return true;
-        }
-        self.batch_tx.has_batch(batch_id).unwrap_or_else(|_| {
-            warn!("In BlockPublisher.has_batch, batchsender.has_batch errored");
-            false
-        })
+        return state.pending_batches.contains(batch_id);
     }
 }
 
