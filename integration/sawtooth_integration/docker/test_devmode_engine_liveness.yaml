@@ -157,6 +157,8 @@ services:
       - 5005
     command: "bash -c \"\
         sawadm keygen && \
+        apt-get update && apt-get -y install valgrind && \
+        valgrind --tool=massif --log-file=/project/sawtooth-core/massif.validator-1.out \
         sawtooth-validator -v \
             --endpoint tcp://validator-1:8800 \
             --bind component:tcp://eth0:4004 \
@@ -166,7 +168,10 @@ services:
             --seeds tcp://validator-0:8800 \
             --scheduler parallel \
     \""
-    stop_signal: SIGKILL
+    stop_signal: SIGTERM
+    environment:
+      PYTHONPATH: "/project/sawtooth-core/sdk/python:\
+        /project/sawtooth-core/families/block_info"
 
   validator-2:
     build:

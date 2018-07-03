@@ -31,6 +31,11 @@ extern crate log;
 extern crate rand;
 extern crate uluru;
 
+use std::alloc::System;
+
+#[global_allocator]
+static GLOBAL: System = System;
+
 // exported modules
 pub mod database;
 pub mod execution;

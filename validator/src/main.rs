@@ -10,6 +10,10 @@ use cpython::Python;
 use server::cli;
 
 use std::process;
+use std::alloc::System;
+
+#[global_allocator]
+static GLOBAL: System = System;
 
 fn main() {
     let gil = Python::acquire_gil();

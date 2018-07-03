@@ -892,7 +892,7 @@ impl QueueLimit {
     ///     queue_length (int): the current size of the queue
     ///     consumed (int): the number items consumed
     pub fn update(&mut self, queue_length: usize, consumed: usize) {
-        if consumed > 0 {
+        if consumed <= queue_length && consumed > 0 {
             // Only update the average if either:
             // a. Not drained below the current average
             // b. Drained the queue, but the queue was not bigger than the

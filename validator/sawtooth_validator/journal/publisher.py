@@ -211,7 +211,7 @@ class BlockPublisher(OwnedPointer):
             raise BlockEmpty("The block is empty")
 
     def start(self):
-        sender_ptr = ctypes.c_void_p()
+        sender_ptr = ctypes.c_void_p(0)
         self._call('start', ctypes.byref(sender_ptr))
         return IncomingBatchSender(sender_ptr)
 
@@ -238,7 +238,7 @@ class BlockPublisher(OwnedPointer):
 
     @property
     def chain_head_lock(self):
-        chain_head_lock_ptr = ctypes.c_void_p()
+        chain_head_lock_ptr = ctypes.c_void_p(0)
         self._call('chain_head_lock', ctypes.byref(chain_head_lock_ptr))
         return ChainHeadLock(chain_head_lock_ptr)
 

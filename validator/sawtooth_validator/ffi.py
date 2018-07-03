@@ -70,7 +70,9 @@ def prepare_byte_result():
     """Returns pair of byte pointer and size value for use as return parameters
     in a LIBRARY call
     """
-    return (ctypes.POINTER(ctypes.c_uint8)(), ctypes.c_size_t(0))
+    pointer = ctypes.POINTER(ctypes.c_uint8)()
+    pointer.values = None
+    return (pointer, ctypes.c_size_t(0))
 
 
 def from_c_bytes(c_data, c_data_len, reclaim=True):
@@ -103,7 +105,7 @@ class OwnedPointer(metaclass=ABCMeta):
         if initialized_ptr is not None:
             self._ptr = initialized_ptr
         else:
-            self._ptr = ctypes.c_void_p()
+            self._ptr = ctypes.c_void_p(0)
 
         self._drop_ffi_fn = drop_ffi_call_fn
 

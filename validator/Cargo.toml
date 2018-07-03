@@ -30,3 +30,6 @@ crate-type = ["dylib"]
 [[bin]]
 name = "sawtooth-validator"
 path = "src/main.rs"
+
+[profile.release]
+debug = true

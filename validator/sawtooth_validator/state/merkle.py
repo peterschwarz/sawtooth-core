@@ -216,7 +216,7 @@ class _LeafIterator:
 
         c_prefix = ctypes.c_char_p(prefix.encode())
 
-        self._c_iter_ptr = ctypes.c_void_p()
+        self._c_iter_ptr = ctypes.c_void_p(0)
 
         _libexec('merkle_db_leaf_iterator_new',
                  merkle_db_ptr, c_prefix, ctypes.byref(self._c_iter_ptr))
