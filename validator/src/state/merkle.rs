@@ -619,10 +619,6 @@ fn delete_ignore_missing(
             if s == "MDB_NOTFOUND: No matching key/data pair found" =>
         {
             // This can be ignored, as the record doesn't exist
-            debug!(
-                "Attempting to delete a missing entry: {}",
-                ::hex::encode(key)
-            );
             Ok(())
         }
         Err(err) => Err(StateDatabaseError::DatabaseError(err)),
