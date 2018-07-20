@@ -932,7 +932,8 @@ mod tests {
     #[test]
     fn merkle_trie_update() {
         run_test(|merkle_path| {
-            let mut merkle_db = make_db(&merkle_path);
+            let db = make_lmdb(&merkle_path);
+            let mut merkle_db = MerkleDatabase::new(db.clone(), None).expect("No db errors");
             let init_root = merkle_db.get_merkle_root();
 
             let key_hashes = (0..1000)
@@ -973,16 +974,23 @@ mod tests {
             }
 
             let virtual_root = merkle_db.update(&set_items, &delete_items, true).unwrap();
+            let virtual_root_bytes = ::hex::decode(virtual_root.clone()).expect("Proper hex");
 
             // virtual root shouldn't match actual contents of tree
             assert!(merkle_db.set_merkle_root(virtual_root.clone()).is_err());
+            // should not have a change log, either
+            expect_no_change_log(&db, &virtual_root_bytes);
 
             let actual_root = merkle_db.update(&set_items, &delete_items, false).unwrap();
+            let actual_root_bytes = ::hex::decode(actual_root.clone()).expect("Proper hex");
+
             // the virtual root should be the same as the actual root
             assert_eq!(virtual_root, actual_root);
             assert_ne!(actual_root, merkle_db.get_merkle_root());
 
             merkle_db.set_merkle_root(actual_root).unwrap();
+            // check that we have a change log entry for the new root
+            expect_change_log(&db, &actual_root_bytes);
 
             for (address, value) in values {
                 assert_value_at_address(&merkle_db, &address, &value);
@@ -1352,6 +1360,14 @@ mod tests {
             .expect("No db errors")
             .expect("A change log entry"))
             .expect("The change log entry to have bytes")
+    }
+
+    fn expect_no_change_log(db: &LmdbDatabase, root_hash: &[u8]) {
+        let reader = db.reader().unwrap();
+        assert!(&reader
+            .index_get(CHANGE_LOG_INDEX, root_hash)
+            .expect("No db errors")
+            .is_none());
     }
 
     fn assert_has_successors(change_log: &ChangeLogEntry, successor_roots: &[&[u8]]) {
