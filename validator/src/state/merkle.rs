@@ -66,7 +66,7 @@ impl MerkleDatabase {
     /// An optional starting merkle root may be provided.
     pub fn new(db: LmdbDatabase, merkle_root: Option<&str>) -> Result<Self, StateDatabaseError> {
         let root_hash = merkle_root.map_or_else(|| initialize_db(&db), |s| Ok(s.into()))?;
-        let root_node = get_node_by_hash(&db, &root_hash)?;
+        let root_node = get_node_by_hash(&db, &root_hash, 0)?;
 
         Ok(MerkleDatabase {
             root_hash,
@@ -183,7 +183,7 @@ impl MerkleDatabase {
         merkle_root: S,
     ) -> Result<(), StateDatabaseError> {
         let new_root = merkle_root.into();
-        self.root_node = get_node_by_hash(&self.db, &new_root)?;
+        self.root_node = get_node_by_hash(&self.db, &new_root, 0)?;
         self.root_hash = new_root;
         Ok(())
     }
@@ -390,7 +390,7 @@ impl MerkleDatabase {
         // There's probably a better way to do this than a clone
         let mut node = self.root_node.clone();
 
-        for token in tokens.iter() {
+        for (i, token) in tokens.iter().enumerate() {
             node = match node.children.get(&token.to_string()) {
                 None => {
                     return Err(StateDatabaseError::NotFound(format!(
@@ -398,7 +398,7 @@ impl MerkleDatabase {
                         address, self.root_hash
                     )))
                 }
-                Some(child_hash) => get_node_by_hash(&self.db, child_hash)?,
+                Some(child_hash) => get_node_by_hash(&self.db, child_hash, (i as i32) + 1)?,
             }
         }
         Ok(node)
@@ -416,12 +416,12 @@ impl MerkleDatabase {
 
         let mut new_branch = false;
 
-        for token in tokens {
+        for (i, token) in tokens.iter().enumerate() {
             let node = {
                 // this is safe to unwrap, because we've just inserted the path in the previous loop
                 let child_address = &nodes[&path].children.get(&token.to_string());
                 if !new_branch && child_address.is_some() {
-                    get_node_by_hash(&self.db, child_address.unwrap())?
+                    get_node_by_hash(&self.db, child_address.unwrap(), (i as i32) + 1)?
                 } else {
                     if strict {
                         return Err(StateDatabaseError::NotFound(format!(
@@ -508,7 +508,7 @@ impl Iterator for MerkleLeafIterator {
                 // Reverse the list, such that we have an in-order traversal of the
                 // children, based on the natural path order.
                 for (child_path, hash_key) in node.children.iter().rev() {
-                    let child = match get_node_by_hash(&self.merkle_db.db, hash_key) {
+                    let child = match get_node_by_hash(&self.merkle_db.db, hash_key, -1) {
                         Ok(node) => node,
                         Err(err) => return Some(Err(err)),
                     };
@@ -670,10 +670,17 @@ fn tokenize_address(address: &str) -> Box<[&str]> {
 }
 
 /// Fetch a node by its hash
-fn get_node_by_hash(db: &LmdbDatabase, hash: &str) -> Result<Node, StateDatabaseError> {
+fn get_node_by_hash(db: &LmdbDatabase, hash: &str, depth: i32) -> Result<Node, StateDatabaseError> {
     match db.reader()?.get(hash.as_bytes()) {
         Some(bytes) => Node::from_bytes(&bytes),
-        None => Err(StateDatabaseError::NotFound(hash.to_string())),
+        None => Err(StateDatabaseError::NotFound(
+                format!("Unable to find node at {}{}",
+                        hash.to_string(),
+                        if depth >= 0 {
+                            format!(" at depth {}", depth)
+                        } else {
+                            String::new()
+                        }))),
     }
 }
 

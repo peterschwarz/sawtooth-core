@@ -410,15 +410,9 @@ pub unsafe extern "C" fn merkle_db_update(
 
             ErrorCode::Success
         }
-        Err(StateDatabaseError::NotFound(addr)) => {
+        Err(StateDatabaseError::NotFound(err_msg)) => {
             error!(
-                "Address {}, in {}, was not found.",
-                addr,
-                if update_map.contains_key(&addr) {
-                    "updates"
-                } else {
-                    "deletions"
-                }
+                "Item not found on update: {}", err_msg
             );
             ErrorCode::NotFound
         }

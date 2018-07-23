@@ -911,3 +911,19 @@ impl Exit {
         self.flag.store(true, Ordering::Relaxed);
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rolling_average() {
+        let mut rolling_avg = RollingAverage::new(3, 30);
+        assert_eq!(30, rolling_avg.value());
+        rolling_avg.update(40);
+        assert_eq!(35, rolling_avg.value());
+        rolling_avg.update(40);
+        assert_eq!(36, rolling_avg.value());
+    }
+}
