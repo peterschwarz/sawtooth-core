@@ -13,10 +13,13 @@
 # limitations under the License.
 # ------------------------------------------------------------------------------
 
-
+import logging
 from collections import namedtuple
 
 from sawtooth_validator.protobuf.block_pb2 import BlockHeader
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class UnknownBlock(Exception):
@@ -72,13 +75,16 @@ class ConsensusProxy:
     # Using block publisher
     def initialize_block(self, previous_id):
         if previous_id:
+            LOGGER.error("Initializing block")
             try:
                 previous_block = next(
                     self._block_manager.get([previous_id.hex()]))
             except StopIteration:
                 raise UnknownBlock()
+            LOGGER.error("Informing publisher")
             self._block_publisher.initialize_block(previous_block)
         else:
+            LOGGER.error("Initializing with chain head")
             self._block_publisher.initialize_block(
                 self._chain_controller.chain_head)
 
@@ -111,6 +117,7 @@ class ConsensusProxy:
             raise UnknownBlock(key_error.args[0])
 
     def commit_block(self, block_id):
+        LOGGER.error("committing block")
         try:
             block = next(self._block_manager.get([block_id.hex()]))
         except StopIteration as stop_iteration:
@@ -118,6 +125,7 @@ class ConsensusProxy:
         self._chain_controller.commit_block(block)
 
     def ignore_block(self, block_id):
+        LOGGER.error("ignoring block")
         try:
             block = next(self._block_manager.get([block_id.hex()]))
         except StopIteration:
@@ -125,6 +133,7 @@ class ConsensusProxy:
         self._chain_controller.ignore_block(block)
 
     def fail_block(self, block_id):
+        LOGGER.error("failing block")
         try:
             block = next(self._block_manager.get([block_id.hex()]))
         except StopIteration:
@@ -134,6 +143,7 @@ class ConsensusProxy:
     # Using blockstore and state database
     def blocks_get(self, block_ids):
         '''Returns a list of blocks.'''
+        LOGGER.error("getting blocks")
         return self._get_blocks([block_id.hex() for block_id in block_ids])
 
     def chain_head_get(self):
@@ -149,6 +159,7 @@ class ConsensusProxy:
     def settings_get(self, block_id, settings):
         '''Returns a list of key/value pairs (str, str).'''
 
+        LOGGER.error("getting settings")
         block = self._get_blocks([block_id.hex()])[0]
 
         block_header = BlockHeader()

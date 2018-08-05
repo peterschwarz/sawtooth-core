@@ -48,3 +48,5 @@ mod block_ffi;
 pub mod transaction;
 
 pub mod ffi;
+
+mod sync_spy;

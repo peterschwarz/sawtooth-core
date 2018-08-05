@@ -28,9 +28,10 @@ use std::sync::mpsc::RecvError;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::RwLock;
+// use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
+use sync_spy::SpyRwLock as RwLock;
 
 use protobuf;
 use uluru;
@@ -152,7 +153,6 @@ type BlockValidationResultCache =
 
 struct ChainControllerState {
     block_manager: BlockManager,
-    block_validation_results: BlockValidationResultCache,
     chain_reader: Box<ChainReader>,
     chain_head: Option<Block>,
     chain_id_manager: ChainIdManager,
@@ -162,32 +162,12 @@ struct ChainControllerState {
 
 impl ChainControllerState {
     fn has_block(&self, block_id: &str) -> bool {
-        let block_ids = [block_id];
-
-        let mut block_iter = self.block_manager.get(&block_ids);
-        block_iter.next().map(|b| b.is_some()).unwrap_or(false)
-    }
-
-    fn block_validation_result(&mut self, block_id: &str) -> Option<BlockValidationResult> {
-        self.block_validation_results
-            .find(|result| &result.block_id == block_id)
-            .cloned()
-            .or_else(|| {
-                if self.chain_reader
-                    .get_block_by_block_id(block_id)
-                    .expect("ChainReader errored reading from the database")
-                    .is_some()
-                {
-                    let result = BlockValidationResult {
-                        block_id: block_id.into(),
-                        execution_results: vec![],
-                        num_transactions: 0,
-                        status: BlockStatus::Valid,
-                    };
-                    return Some(result);
-                }
-                None
-            })
+        self.block_manager
+            .get(&[block_id])
+            .next()
+            .as_ref()
+            .map(Option::is_some)
+            .unwrap_or(false)
     }
 
     fn build_fork<'a>(
@@ -276,6 +256,8 @@ pub struct ChainController<BV: BlockValidator> {
 
     consensus_notifier: Arc<ConsensusNotifier>,
     block_validator: BV,
+    block_validation_results: Arc<RwLock<BlockValidationResultCache>>,
+
     // Queues
     block_queue_sender: Option<Sender<Block>>,
     commit_queue_sender: Option<Sender<Block>>,
@@ -298,16 +280,22 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
         state_pruning_manager: StatePruningManager,
     ) -> Self {
         let mut chain_controller = ChainController {
-            state: Arc::new(RwLock::new(ChainControllerState {
-                block_manager,
-                block_validation_results: BlockValidationResultCache::default(),
-                chain_reader,
-                chain_id_manager: ChainIdManager::new(data_dir),
-                observers,
-                chain_head: None,
-                state_pruning_manager,
-            })),
+            state: Arc::new(RwLock::new(
+                "ChainController",
+                ChainControllerState {
+                    block_manager,
+                    chain_reader,
+                    chain_id_manager: ChainIdManager::new(data_dir),
+                    observers,
+                    chain_head: None,
+                    state_pruning_manager,
+                },
+            )),
             block_validator,
+            block_validation_results: Arc::new(RwLock::new(
+                "BlockValidationResultCache",
+                BlockValidationResultCache::default(),
+            )),
             stop_handle: Arc::new(Mutex::new(None)),
             block_queue_sender: None,
             commit_queue_sender: None,
@@ -324,17 +312,40 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
 
     pub fn chain_head(&self) -> Option<Block> {
         let state = self.state
-            .read()
+            .read_with_meta(file!(), line!())
             .expect("No lock holder should have poisoned the lock");
 
         state.chain_head.clone()
     }
 
     pub fn block_validation_result(&self, block_id: &str) -> Option<BlockValidationResult> {
-        let mut state = self.state
-            .write()
-            .expect("No lock holder should have poisoned the lock");
-        state.block_validation_result(block_id)
+        let block_validation_result = {
+            let mut cache = self.block_validation_results
+                .write_with_meta(file!(), line!())
+                .expect("Unable to acquire read lock, due to poisoning");
+
+            cache.find(|result| &result.block_id == block_id).cloned()
+        };
+
+        block_validation_result.or_else(|| {
+            if self.state
+                .read_with_meta(file!(), line!())
+                .expect("Unable to acquire read lock, due to poisoning")
+                .chain_reader
+                .get_block_by_block_id(block_id)
+                .expect("ChainReader errored reading from the database")
+                .is_some()
+            {
+                let result = BlockValidationResult {
+                    block_id: block_id.into(),
+                    execution_results: vec![],
+                    num_transactions: 0,
+                    status: BlockStatus::Valid,
+                };
+                return Some(result);
+            }
+            None
+        })
     }
 
     /// This is used by a non-genesis journal when it has received the
@@ -366,13 +377,14 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
                         .save_block_chain_id(&block.header_signature)?;
                 }
 
-                state.block_manager.persist(&block.header_signature, COMMIT_STORE)?;
+                state
+                    .block_manager
+                    .persist(&block.header_signature, COMMIT_STORE)?;
                 state.chain_head = Some(block.clone());
                 let mut guard = lock.acquire();
                 guard.notify_on_chain_updated(block.clone(), vec![], vec![]);
             }
         }
-
 
         Ok(())
     }
@@ -380,16 +392,19 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
     pub fn on_block_received(&mut self, block: Block) -> Result<(), ChainControllerError> {
         {
             let mut state = self.state
-                .write()
+                .write_with_meta(file!(), line!())
                 .expect("No lock holder should have poisoned the lock");
 
+            eprintln!("received_block: write lock acquired");
             if state.has_block(&block.header_signature) {
                 return Ok(());
             }
+            eprintln!("received_block: new block");
             match state.block_manager.put(vec![block.clone()]) {
                 Ok(_) => (),
                 Err(err) => warn!("During put to block manager in on_block_received {:?}", err),
             }
+            eprintln!("received_block: put block");
             if state.chain_head.is_none() {
                 if let Err(err) = self.set_genesis(&mut state, &self.chain_head_lock, block.clone())
                 {
@@ -409,15 +424,17 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
             )
             .clone();
 
+        eprintln!("received_block: Sending for validation");
         self.block_validator
             .submit_blocks_for_verification(&[block], sender);
 
+        eprintln!("received_block: done");
         Ok(())
     }
 
     pub fn has_block(&self, block_id: &str) -> bool {
         let state = self.state
-            .read()
+            .read_with_meta(file!(), line!())
             .expect("No lock holder should have poisoned the lock");
         state.has_block(block_id)
     }
@@ -427,27 +444,26 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
     }
 
     pub fn fail_block(&self, block: &mut Block) {
-        let mut state = self.state
-            .write()
+        let mut block_validation_results = self.block_validation_results
+            .write_with_meta(file!(), line!())
             .expect("No lock holder should have poisoned the lock");
 
-        state
-            .block_validation_results
+        block_validation_results
             .find(|result| &result.block_id == &block.header_signature)
             .map(|result| result.status = BlockStatus::Invalid);
     }
 
     fn set_block_validation_result(&self, result: BlockValidationResult) {
-        let mut state = self.state
-            .write()
+        let mut block_validation_results = self.block_validation_results
+            .write_with_meta(file!(), line!())
             .expect("No lock holder should have poisoned the lock");
 
-        state.block_validation_results.insert(result);
+        block_validation_results.insert(result);
     }
 
     fn get_block_unchecked(&self, block_id: String) -> Block {
         let state = self.state
-            .read()
+            .read_with_meta(file!(), line!())
             .expect("No lock holder should have poisoned the lock");
 
         let block_id = block_id.as_str();
@@ -488,10 +504,12 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
     fn handle_block_commit(&mut self, block: &Block) -> Result<(), ChainControllerError> {
         {
             // only hold this lock as long as the loop is active.
+            eprintln!("block_commit: committing block");
             let mut state = self.state
-                .write()
+                .write_with_meta(file!(), line!())
                 .expect("No lock holder should have poisoned the lock");
 
+            eprintln!("block_commit: committing block");
             loop {
                 let chain_head = state.chain_reader.chain_head()?.expect(
                     "Attempting to handle block commit before a genesis block has been committed",
@@ -503,6 +521,7 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
                     continue;
                 }
 
+                eprintln!("block_commit: chain not updated");
                 state.chain_head = Some(block.clone());
 
                 let new_roots: Vec<String> = result
@@ -528,6 +547,7 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
                         .as_slice(),
                 );
 
+                eprintln!("block_commit: persisting...");
                 state.block_manager.persist(
                     &state.chain_head.as_ref().unwrap().header_signature,
                     COMMIT_STORE,
@@ -568,8 +588,9 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
                 });
 
                 for block in result.new_chain.iter().rev() {
-                    let receipts: Vec<TransactionReceipt> = state
-                        .block_validation_results
+                    let receipts: Vec<TransactionReceipt> = self.block_validation_results
+                        .write_with_meta(file!(), line!())
+                        .expect("Unable to acquire read lock, due to poisoning")
                         .find(|result| &block.header_signature == &result.block_id)
                         .expect("A block that has no validation results was committed")
                         .execution_results
@@ -632,6 +653,7 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
             // publicly accessible instance
             stop_handle: Arc::new(Mutex::new(None)),
             block_validator: self.block_validator.clone(),
+            block_validation_results: self.block_validation_results.clone(),
             block_queue_sender: self.block_queue_sender.clone(),
             commit_queue_sender: self.commit_queue_sender.clone(),
             validation_result_sender: self.validation_result_sender.clone(),
@@ -688,7 +710,7 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
         // we need to check to see if a genesis block was created and stored,
         // before this controller was started
         let mut state = self.state
-            .write()
+            .write_with_meta(file!(), line!())
             .expect("No lock holder should have poisoned the lock");
 
         let chain_head = state
@@ -781,9 +803,8 @@ impl<BV: BlockValidator + 'static> ChainController<BV> {
                 };
 
                 if !result_thread_exit.load(Ordering::Relaxed) {
-                    result_thread_controller.set_block_validation_result(
-                        block_validation_result.clone(),
-                    );
+                    result_thread_controller
+                        .set_block_validation_result(block_validation_result.clone());
                     let block = result_thread_controller
                         .get_block_unchecked(block_validation_result.block_id);
                     result_thread_controller.on_block_validated(&block);

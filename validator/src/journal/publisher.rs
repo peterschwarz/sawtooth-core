@@ -25,6 +25,7 @@ use std::slice::Iter;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, SendError, Sender};
 use std::sync::{Arc, RwLock};
+use sync_spy::SpyRwLock;
 use std::thread;
 use std::time::Duration;
 
@@ -101,7 +102,7 @@ impl BlockPublisherState {
 }
 
 pub struct SyncBlockPublisher {
-    pub state: Arc<RwLock<BlockPublisherState>>,
+    pub state: Arc<SpyRwLock<BlockPublisherState>>,
 
     block_manager: BlockManager,
     batch_observers: Vec<PyObject>,
@@ -195,7 +196,7 @@ impl SyncBlockPublisher {
         uncommitted_batches: Vec<Batch>,
     ) {
         let mut state = self.state
-            .write()
+            .write_with_meta(file!(), line!())
             .expect("RwLock was poisoned during a write lock");
         self.on_chain_updated(
             &mut state,
@@ -445,7 +446,7 @@ impl SyncBlockPublisher {
     }
 
     pub fn on_batch_received(&self, batch: Batch) {
-        let mut state = self.state.write().expect("Lock should not be poisoned");
+        let mut state = self.state.write_with_meta(file!(), line!()).expect("Lock should not be poisoned");
         for observer in &self.batch_observers {
             let gil = Python::acquire_gil();
             let py = gil.python();
@@ -513,7 +514,7 @@ impl BlockPublisher {
     ) -> Self {
         let tep = Box::new(PyExecutor::new(transaction_executor).unwrap());
 
-        let state = Arc::new(RwLock::new(BlockPublisherState::new(
+        let state = Arc::new(SpyRwLock::new("BlockPublisher", BlockPublisherState::new(
             tep,
             chain_head,
             None,
@@ -574,7 +575,7 @@ impl BlockPublisher {
     }
 
     pub fn cancel_block(&self) -> Result<(), CancelBlockError> {
-        let mut state = self.publisher.state.write().expect("RwLock was poisoned");
+        let mut state = self.publisher.state.write_with_meta(file!(), line!()).expect("RwLock was poisoned");
         if state.candidate_block.is_some() {
             self.publisher.cancel_block(&mut state);
             Ok(())
@@ -592,7 +593,7 @@ impl BlockPublisher {
     }
 
     pub fn initialize_block(&self, previous_block: Block) -> Result<(), InitializeBlockError> {
-        let mut state = self.publisher.state.write().expect("RwLock was poisoned");
+        let mut state = self.publisher.state.write_with_meta(file!(), line!()).expect("RwLock was poisoned");
         self.publisher.initialize_block(&mut state, &previous_block)
     }
 
@@ -601,20 +602,20 @@ impl BlockPublisher {
         consensus_data: Vec<u8>,
         force: bool,
     ) -> Result<String, FinalizeBlockError> {
-        let mut state = self.publisher.state.write().expect("RwLock is poisoned");
+        let mut state = self.publisher.state.write_with_meta(file!(), line!()).expect("RwLock is poisoned");
         self.publisher
             .finalize_block(&mut state, consensus_data, force)
     }
 
     pub fn summarize_block(&self, force: bool) -> Result<Vec<u8>, FinalizeBlockError> {
-        let mut state = self.publisher.state.write().expect("RwLock is poisoned");
+        let mut state = self.publisher.state.write_with_meta(file!(), line!()).expect("RwLock is poisoned");
         self.publisher.summarize_block(&mut state, force)
     }
 
     pub fn pending_batch_info(&self) -> (i32, i32) {
         let state = self.publisher
             .state
-            .read()
+            .read_with_meta(file!(), line!())
             .expect("RwLock was poisoned during a write lock");
         (
             state.pending_batches.len() as i32,
@@ -625,7 +626,7 @@ impl BlockPublisher {
     pub fn has_batch(&self, batch_id: &str) -> bool {
         let state = self.publisher
             .state
-            .read()
+            .read_with_meta(file!(), line!())
             .expect("RwLock was poisoned during a write lock");
         return state.pending_batches.contains(batch_id);
     }

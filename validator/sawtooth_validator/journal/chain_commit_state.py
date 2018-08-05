@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------------
+import logging
 
 from sawtooth_validator.journal.block_wrapper import NULL_BLOCK_IDENTIFIER
 from sawtooth_validator.protobuf.block_pb2 import BlockHeader
 from sawtooth_validator.protobuf.transaction_pb2 import TransactionHeader
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MissingDependency(Exception):
@@ -56,7 +60,7 @@ class ChainCommitState:
         # store. Batches and transactions that are in a block that is in the
         # block store and that has a greater block number than this block must
         # be ignored.
-
+        LOGGER.error("building commit state")
         if head_id != NULL_BLOCK_IDENTIFIER:
             head = next(block_manager.get([head_id]))
             ancestor = head

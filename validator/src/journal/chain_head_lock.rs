@@ -4,7 +4,8 @@ use cpython;
 use cpython::ToPyObject;
 use journal::block_wrapper::BlockWrapper;
 use journal::publisher::{BlockPublisherState, SyncBlockPublisher};
-use std::sync::RwLockWriteGuard;
+// use std::sync::RwLockWriteGuard;
+use sync_spy::SpyRwLockWriteGuard as RwLockWriteGuard;
 
 /// Abstracts acquiring the lock used by the BlockPublisher without exposing access to the
 /// publisher itself.
