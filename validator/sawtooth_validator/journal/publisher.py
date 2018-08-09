@@ -167,6 +167,7 @@ class BlockPublisher(OwnedPointer):
         """
         super(BlockPublisher, self).__init__('block_publisher_drop')
 
+        chain_head_block = chain_head.block if chain_head else None
         self._to_exception(PY_LIBRARY.call(
             'block_publisher_new',
             block_manager.pointer,
@@ -177,7 +178,7 @@ class BlockPublisher(OwnedPointer):
             ctypes.py_object(settings_cache),
             ctypes.py_object(block_sender),
             ctypes.py_object(batch_sender),
-            ctypes.py_object(chain_head),
+            ctypes.py_object(chain_head_block),
             ctypes.py_object(identity_signer),
             ctypes.py_object(data_dir),
             ctypes.py_object(config_dir),
