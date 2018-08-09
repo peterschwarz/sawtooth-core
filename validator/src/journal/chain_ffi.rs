@@ -279,10 +279,11 @@ pub unsafe extern "C" fn chain_controller_chain_head(
     if let Some(chain_head) = controller.chain_head().map(proto::block::Block::from) {
         match chain_head.write_to_bytes() {
             Ok(payload) => {
-                *block_len = payload.len();
-                *block = payload.as_ptr();
+                let bytes = payload.into_boxed_slice();
+                *block_len = bytes.len();
+                *block = bytes.as_ptr();
 
-                mem::forget(payload);
+                mem::forget(bytes);
 
                 ErrorCode::Success
             }

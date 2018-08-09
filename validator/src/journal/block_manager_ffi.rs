@@ -235,9 +235,10 @@ pub unsafe extern "C" fn block_manager_get_iterator_next(
         let proto_block: proto::block::Block = block.into();
         let bytes = proto_block
             .write_to_bytes()
-            .expect("Failed to serialize proto Block");
+            .expect("Failed to serialize proto Block")
+            .into_boxed_slice();
 
-        *block_len = bytes.as_slice().len();
+        *block_len = bytes.len();
         *block_bytes = bytes.as_ptr();
 
         mem::forget(bytes);
@@ -284,9 +285,10 @@ pub unsafe extern "C" fn block_manager_branch_iterator_next(
         let proto_block: proto::block::Block = block.into();
         let bytes = proto_block
             .write_to_bytes()
-            .expect("Failed to serialize proto Block");
+            .expect("Failed to serialize proto Block")
+            .into_boxed_slice();
 
-        *block_len = bytes.as_slice().len();
+        *block_len = bytes.len();
         *block_bytes = bytes.as_ptr();
 
         mem::forget(bytes);
@@ -343,9 +345,10 @@ pub unsafe extern "C" fn block_manager_branch_diff_iterator_next(
         let proto_block: proto::block::Block = block.into();
         let bytes = proto_block
             .write_to_bytes()
-            .expect("Failed to serialize proto Block");
+            .expect("Failed to serialize proto Block")
+            .into_boxed_slice();
 
-        *block_len = bytes.as_slice().len();
+        *block_len = bytes.len();
         *block_bytes = bytes.as_ptr();
 
         mem::forget(bytes);

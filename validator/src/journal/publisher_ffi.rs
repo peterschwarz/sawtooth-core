@@ -288,10 +288,11 @@ pub extern "C" fn block_publisher_finalize_block(
         Err(FinalizeBlockError::BlockNotInitialized) => ErrorCode::BlockNotInitialized,
         Err(FinalizeBlockError::BlockEmpty) => ErrorCode::BlockEmpty,
         Ok(block_id) => unsafe {
-            *result = block_id.as_ptr();
-            *result_len = block_id.as_bytes().len();
+            let bytes = block_id.into_bytes().into_boxed_slice();
+            *result_len = bytes.len();
+            *result = bytes.as_ptr();
 
-            mem::forget(block_id);
+            mem::forget(bytes);
 
             ErrorCode::Success
         },
@@ -311,10 +312,11 @@ pub extern "C" fn block_publisher_summarize_block(
         Err(FinalizeBlockError::BlockEmpty) => ErrorCode::BlockEmpty,
         Err(FinalizeBlockError::BlockNotInitialized) => ErrorCode::BlockNotInitialized,
         Ok(consensus) => unsafe {
-            *result = consensus.as_ptr();
-            *result_len = consensus.as_slice().len();
+            let bytes = consensus.into_boxed_slice();
+            *result_len = bytes.len();
+            *result = bytes.as_ptr();
 
-            mem::forget(result);
+            mem::forget(bytes);
 
             ErrorCode::Success
         },

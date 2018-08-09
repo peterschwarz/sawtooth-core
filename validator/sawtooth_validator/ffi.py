@@ -82,8 +82,8 @@ def from_c_bytes(c_data, c_data_len, reclaim=True):
     if reclaim:
         LIBRARY.call(
             "ffi_reclaim_bytes",
-            ctypes.byref(c_data),
-            ctypes.byref(c_data_len))
+            c_data,
+            c_data_len)
     return py_bytes
 
 
