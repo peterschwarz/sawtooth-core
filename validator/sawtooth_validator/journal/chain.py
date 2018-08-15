@@ -174,7 +174,7 @@ def _exec(library, name, *args):
     if res == ErrorCode.InvalidBlockId:
         raise ValueError("Invalid block id provided.")
 
-    raise TypeError("Unknown error occurred: {}".format(res.error))
+    raise TypeError("Unknown error occurred: {}".format(res))
 
 
 class ErrorCode(IntEnum):
