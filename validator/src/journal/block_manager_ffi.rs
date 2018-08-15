@@ -217,6 +217,7 @@ pub unsafe extern "C" fn block_manager_ref_block(
 pub unsafe extern "C" fn block_manager_unref_block(
     block_manager: *mut c_void,
     block_id: *const c_char,
+    result: *mut bool,
 ) -> ErrorCode {
     check_null!(block_manager, block_id);
 
@@ -226,7 +227,10 @@ pub unsafe extern "C" fn block_manager_unref_block(
     };
 
     match (*(block_manager as *mut BlockManager)).unref_block(block_id) {
-        Ok(_) => ErrorCode::Success,
+        Ok(dropped) =>{
+            *result = dropped;
+            ErrorCode::Success
+        },
         Err(BlockManagerError::UnknownBlock) => ErrorCode::UnknownBlock,
         Err(err) => {
             error!("Unexpected error while unref'ing block: {:?}", err);
