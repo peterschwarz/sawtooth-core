@@ -51,3 +51,8 @@ mod block_ffi;
 pub mod transaction;
 
 pub mod ffi;
+
+use std::alloc::System;
+
+#[global_allocator]
+static A: System = System;

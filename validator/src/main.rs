@@ -9,7 +9,11 @@ mod server;
 use cpython::Python;
 use server::cli;
 
+use std::alloc::System;
 use std::process;
+
+#[global_allocator]
+static A: System = System;
 
 fn main() {
     let gil = Python::acquire_gil();
