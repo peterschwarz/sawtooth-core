@@ -153,7 +153,7 @@ class _SendReceive:
         self._identities_to_connection_ids = {}
         self._monitor = monitor
 
-        self._check_connections = None
+        self._check_connections = lambda: None
         self._monitor_fd = None
         self._monitor_sock = None
 
