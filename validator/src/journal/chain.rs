@@ -410,80 +410,31 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
             "Attempted to submit blocks for validation before starting the chain controller",
         );
 
-        let block = {
-            let mut state = self
-                .state
-                .read()
-                .expect("No lock holder should have poisoned the lock");
+        let state = self
+            .state
+            .read()
+            .expect("No lock holder should have poisoned the lock");
 
-            if let Some(Some(block)) = state.block_manager.get(&[&block_id]).nth(0) {
-                // Create Ref-C: Hold this block until we finish validating it. If the block is
-                // invalid, unref it. If the block is valid, pass the reference on to consensus and
-                // wait to unref until consensus renders a {commit, ignore, fail} opinion on the
-                // block.
-                if let Err(err) = state.block_manager.ref_block(&block_id) {
-                    error!(
-                        "Unable to ref block {} received from completer; ignoring: {:?}",
-                        &block_id, err
-                    );
-                    None
-                } else {
-                    self.block_validator
-                        .submit_blocks_for_verification(&[block.clone()], &sender);
-                    Some(block)
-                }
-            } else {
-                warn!(
-                    "Received block id for block not in block manager: {}",
-                    block_id
+        if let Some(Some(block)) = state.block_manager.get(&[&block_id]).nth(0) {
+            // Create Ref-C: Hold this block until we finish validating it. If the block is
+            // invalid, unref it. If the block is valid, pass the reference on to consensus and
+            // wait to unref until consensus renders a {commit, ignore, fail} opinion on the
+            // block.
+            eprintln!("Create Ref-C: {}", block_id);
+            if let Err(err) = state.block_manager.ref_block(&block_id) {
+                error!(
+                    "Unable to ref block {} received from completer; ignoring: {:?}",
+                    &block_id, err
                 );
-                None
+            } else {
+                self.block_validator
+                    .submit_blocks_for_verification(&[block.clone()], &sender);
             }
-        };
-
-        if let Some(block) = block {
-            let mut state = self
-                .state
-                .write()
-                .expect("No lock holder should have poisoned the lock");
-
-            // Transfer Ref-B: Implicitly transfer ownership of the external reference placed on
-            // this block by the completer. The ForkCache is now responsible for unrefing the block
-            // when it expires. This happens when either 1) the block is replaced in the cache by
-            // another block which extends it, at which point this block will have an int. ref.
-            // count of at least 1, or 2) the fork becomes inactive the block is purged, at which
-            // point the block may be dropped if no other ext. ref's exist.
-            if let Some(previous_block_id) = state
-                .fork_cache
-                .insert(&block_id, Some(&block.previous_block_id))
-            {
-                // Drop Ref-B: This fork was extended and so this block has an int. ref. count of
-                // at least one, so we can drop the ext. ref. placed on the block to keep the fork
-                // around.
-                match state.block_manager.unref_block(&previous_block_id) {
-                    Ok(true) => {
-                        panic!(
-                            "Block {:?} was unref'ed because it was the head of a fork that was
-                            just extended. The unref caused the block to drop, but it should have
-                            had an internal reference count of at least 1.",
-                            previous_block_id,
-                        );
-                    }
-                    Ok(false) => (),
-                    Err(err) => error!(
-                        "Failed to unref expired block {}: {:?}",
-                        previous_block_id, err
-                    ),
-                }
-            }
-
-            for block_id in state.fork_cache.purge() {
-                // Drop Ref-B: The fork is no longer active, and we have to drop the ext. ref.
-                // placed on the block to keep the fork around.
-                if let Err(err) = state.block_manager.unref_block(&block_id) {
-                    error!("Failed to unref expired block {}: {:?}", block_id, err);
-                }
-            }
+        } else {
+            warn!(
+                "Received block id for block not in block manager: {}",
+                block_id
+            );
         }
 
         Ok(())
@@ -595,6 +546,48 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         }
     }
 
+    fn update_fork_cache(state: &mut ChainControllerState, block: &Block) {
+        // Transfer Ref-B: Implicitly transfer ownership of the external reference placed on
+        // this block by the completer. The ForkCache is now responsible for unrefing the block
+        // when it expires. This happens when either 1) the block is replaced in the cache by
+        // another block which extends it, at which point this block will have an int. ref.
+        // count of at least 1, or 2) the fork becomes inactive the block is purged, at which
+        // point the block may be dropped if no other ext. ref's exist.
+        if let Some(previous_block_id) = state
+            .fork_cache
+            .insert(&block.header_signature, Some(&block.previous_block_id))
+        {
+            // Drop Ref-B: This fork was extended and so this block has an int. ref. count of
+            // at least one, so we can drop the ext. ref. placed on the block to keep the fork
+            // around.
+            eprintln!("Drop Ref-B: {}", previous_block_id);
+            match state.block_manager.unref_block(&previous_block_id) {
+                Ok(true) => {
+                    panic!(
+                        "Block {:?} was unref'ed because it was the head of a fork that was
+                        just extended. The unref caused the block to drop, but it should have
+                        had an internal reference count of at least 1.",
+                        previous_block_id,
+                    );
+                }
+                Ok(false) => (),
+                Err(err) => error!(
+                    "Failed to unref expired block {}: {:?}",
+                    previous_block_id, err
+                ),
+            }
+        }
+
+        for block_id in state.fork_cache.purge() {
+            // Drop Ref-B: The fork is no longer active, and we have to drop the ext. ref.
+            // placed on the block to keep the fork around.
+            eprintln!("Drop Ref-B (purge): {}", block_id);
+            if let Err(err) = state.block_manager.unref_block(&block_id) {
+                error!("Failed to unref expired block {}: {:?}", block_id, err);
+            }
+        }
+    }
+
     fn on_block_validated(&self, block: &Block, result: &BlockValidationResult) {
         let mut blocks_considered_count =
             COLLECTOR.counter("ChainController.blocks_considered_count", None, None);
@@ -602,6 +595,11 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
 
         match result.status {
             BlockStatus::Valid => {
+                let mut state = self
+                    .state
+                    .write()
+                    .expect("No lock holder should have poisoned the lock");
+                Self::update_fork_cache(&mut state, &block);
                 // Transfer Ref-C: The block has been validated and ownership of the ext. ref. is
                 // passed to the consensus engine. The consensus engine is responsible for
                 // rendering an opinion of either commit, fail, or ignore, at which time the ext.
@@ -609,13 +607,20 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
                 self.consensus_notifier.notify_block_new(block);
             }
             BlockStatus::Invalid => {
-                let state = self
+                let mut state = self
                     .state
                     .read()
                     .expect("No lock holder should have poisoned the lock");
-
-                // Drop Ref-C: The block has been found to be invalid, and we are no longer
+                // Drop Ref-B: The block has been found to be invalid, and we will not
+                // consider it to be a valid tip of a fork in the fork cache
+                eprintln!("Drop Ref-B (invalid): {}", block.header_signature);
+                state
+                    .block_manager
+                    .unref_block(&block.header_signature)
+                    .expect("Failed to unref block in on_block_validated");
+                // Drop Ref-Ck The block has been found to be invalid, and we are no longer
                 // interested in it. The invalid result will be cached for a period.
+                eprintln!("Drop Ref-C (invalid): {}", block.header_signature);
                 state
                     .block_manager
                     .unref_block(&block.header_signature)
