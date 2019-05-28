@@ -68,7 +68,7 @@ impl LmdbContext {
 pub struct LmdbDatabase {
     ctx: LmdbContext,
     main: Arc<lmdb::Database<'static>>,
-    indexes: Arc<HashMap<String, lmdb::Database<'static>>>,
+    indexes: Arc<HashMap<String, Arc<lmdb::Database<'static>>>>,
 }
 
 impl LmdbDatabase {
@@ -90,7 +90,7 @@ impl LmdbDatabase {
             .map_err(|err| {
                 DatabaseError::InitError(format!("Failed to open database: {:?}", err))
             })?;
-            index_dbs.insert(String::from(name.as_ref()), db);
+            index_dbs.insert(String::from(name.as_ref()), Arc::new(db));
         }
         Ok(LmdbDatabase {
             ctx,
@@ -139,7 +139,7 @@ pub trait DatabaseReader {
 
 pub struct LmdbDatabaseReader<'a> {
     db: &'a LmdbDatabase,
-    txn: lmdb::ReadTransaction<'a>,
+    txn: lmdb::ReadTransaction<'static>,
 }
 
 impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
@@ -174,6 +174,7 @@ impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
             .db
             .indexes
             .get(index)
+            .map(Arc::clone)
             .ok_or_else(|| DatabaseError::ReaderError(format!("Not an index: {}", index)))?;
         let cursor = self
             .txn
@@ -209,7 +210,7 @@ impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
 
 pub struct LmdbDatabaseReaderCursor<'a> {
     access: lmdb::ConstAccessor<'a>,
-    cursor: lmdb::Cursor<'a, 'a>,
+    cursor: lmdb::Cursor<'a, 'static>,
 }
 
 impl<'a> LmdbDatabaseReaderCursor<'a> {
@@ -241,7 +242,7 @@ impl<'a> Iterator for LmdbDatabaseReaderCursor<'a> {
 
 pub struct LmdbDatabaseWriter<'a> {
     db: &'a LmdbDatabase,
-    txn: lmdb::WriteTransaction<'a>,
+    txn: lmdb::WriteTransaction<'static>,
 }
 
 impl<'a> LmdbDatabaseWriter<'a> {
@@ -339,6 +340,7 @@ impl<'a> DatabaseReader for LmdbDatabaseWriter<'a> {
             .db
             .indexes
             .get(index)
+            .map(Arc::clone)
             .ok_or_else(|| DatabaseError::ReaderError(format!("Not an index: {}", index)))?;
         let cursor = self
             .txn
