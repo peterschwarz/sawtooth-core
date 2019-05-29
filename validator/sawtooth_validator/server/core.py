@@ -523,10 +523,6 @@ class Validator:
         if self._block_publisher.has_batch(batch_id):
             return True
 
-        if self._incoming_batch_sender and \
-                self._incoming_batch_sender.has_batch(batch_id):
-            return True
-
         return False
 
     def get_chain_head_state_root_hash(self):

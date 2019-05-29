@@ -16,6 +16,7 @@ openssl = "0.10"
 protobuf = "2.0"
 python3-sys = "0.2"
 uluru = "0.2.0"
+uuid = { version = "0.7", features = ["v4"] }
 
 [dev-dependencies]
 rand = "0.4"
@@ -25,8 +26,12 @@ protoc-rust = "2.0"
 glob = "0.2"
 
 [lib]
-crate-type = ["dylib"]
+# crate-type = ["dylib"]
 
 [[bin]]
 name = "sawtooth-validator"
 path = "src/main.rs"
+
+[[bin]]
+name = "cs-profiler"
+path = "src/commit_store_tester.rs"

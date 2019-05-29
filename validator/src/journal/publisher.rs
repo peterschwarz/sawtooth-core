@@ -685,58 +685,59 @@ pub fn make_batch_queue() -> (IncomingBatchSender, IncomingBatchReceiver) {
 }
 
 pub struct IncomingBatchReceiver {
-    ids: Arc<RwLock<HashSet<String>>>,
+    _ids: Arc<RwLock<HashSet<String>>>,
     receiver: Receiver<Batch>,
 }
 
 impl IncomingBatchReceiver {
     pub fn new(
-        ids: Arc<RwLock<HashSet<String>>>,
+        _ids: Arc<RwLock<HashSet<String>>>,
         receiver: Receiver<Batch>,
     ) -> IncomingBatchReceiver {
-        IncomingBatchReceiver { ids, receiver }
+        IncomingBatchReceiver { _ids, receiver }
     }
 
     pub fn get(&mut self, timeout: Duration) -> Result<Batch, BatchQueueError> {
         let batch = self.receiver.recv_timeout(timeout)?;
-        self.ids
-            .write()
-            .expect("RwLock was poisoned during a write lock")
-            .remove(&batch.header_signature);
+        // self.ids
+        //     .write()
+        //     .expect("RwLock was poisoned during a write lock")
+        //     .remove(&batch.header_signature);
         Ok(batch)
     }
 }
 
 #[derive(Clone)]
 pub struct IncomingBatchSender {
-    ids: Arc<RwLock<HashSet<String>>>,
+    _ids: Arc<RwLock<HashSet<String>>>,
     sender: Sender<Batch>,
 }
 
 impl IncomingBatchSender {
-    pub fn new(ids: Arc<RwLock<HashSet<String>>>, sender: Sender<Batch>) -> IncomingBatchSender {
-        IncomingBatchSender { ids, sender }
+    pub fn new(_ids: Arc<RwLock<HashSet<String>>>, sender: Sender<Batch>) -> IncomingBatchSender {
+        IncomingBatchSender { _ids, sender }
     }
     pub fn put(&mut self, batch: Batch) -> Result<(), BatchQueueError> {
-        let mut ids = self
-            .ids
-            .write()
-            .expect("RwLock was poisoned during a write lock");
+        // let mut ids = self
+        //     .ids
+        //     .write()
+        //     .expect("RwLock was poisoned during a write lock");
 
-        if !ids.contains(&batch.header_signature) {
-            ids.insert(batch.header_signature.clone());
-            self.sender.send(batch).map_err(BatchQueueError::from)
-        } else {
-            Ok(())
-        }
+        // if !ids.contains(&batch.header_signature) {
+        //     ids.insert(batch.header_signature.clone());
+        self.sender.send(batch).map_err(BatchQueueError::from)
+        // } else {
+        //     Ok(())
+        // }
     }
 
-    pub fn has_batch(&self, batch_id: &str) -> Result<bool, BatchQueueError> {
-        Ok(self
-            .ids
-            .read()
-            .expect("RwLock was poisoned during a write lock")
-            .contains(batch_id))
+    pub fn has_batch(&self, _batch_id: &str) -> Result<bool, BatchQueueError> {
+        Ok(false)
+        // Ok(self
+        //     .ids
+        //     .read()
+        //     .expect("RwLock was poisoned during a write lock")
+        //     .contains(batch_id))
     }
 }
 

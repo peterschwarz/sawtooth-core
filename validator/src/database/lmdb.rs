@@ -15,15 +15,26 @@
  * ------------------------------------------------------------------------------
  */
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use lmdb_zero as lmdb;
+use lmdb_zero::{
+    self as lmdb,
+    traits::{AssocCursor, CreateCursor},
+    StaleCursor,
+};
 
 use database::error::DatabaseError;
 
 const DEFAULT_SIZE: usize = 1 << 40; // 1024 ** 4
+
+thread_local! {
+    static STALE_CURSORS: RefCell<HashMap<&'static str, StaleCursor<'static>>> = Default::default();
+
+    static RESET_READ_TXNS: RefCell<Option<lmdb::ResetTransaction<'static>>> = RefCell::new(None);
+}
 
 #[derive(Clone)]
 pub struct LmdbContext {
@@ -85,7 +96,7 @@ impl LmdbDatabase {
             let db = lmdb::Database::open(
                 ctx.env.clone(),
                 Some(name.as_ref()),
-                &lmdb::DatabaseOptions::new(lmdb::db::CREATE),
+                &lmdb::DatabaseOptions::new(lmdb::db::CREATE | lmdb::db::DUPSORT),
             )
             .map_err(|err| {
                 DatabaseError::InitError(format!("Failed to open database: {:?}", err))
@@ -100,10 +111,18 @@ impl LmdbDatabase {
     }
 
     pub fn reader(&self) -> Result<LmdbDatabaseReader, DatabaseError> {
-        let txn = lmdb::ReadTransaction::new(self.ctx.env.clone()).map_err(|err| {
-            DatabaseError::ReaderError(format!("Failed to create reader: {}", err))
-        })?;
-        Ok(LmdbDatabaseReader { db: self, txn })
+        let txn = if let Some(reset_txn) =
+            RESET_READ_TXNS.with(|reset_txn| reset_txn.borrow_mut().take())
+        {
+            reset_txn.renew().map_err(|err| {
+                DatabaseError::ReaderError(format!("Failed to renew txn: {}", err))
+            })?
+        } else {
+            lmdb::ReadTransaction::new(self.ctx.env.clone()).map_err(|err| {
+                DatabaseError::ReaderError(format!("Failed to create reader: {}", err))
+            })?
+        };
+        Ok(LmdbDatabaseReader::new(self.clone(), txn))
     }
 
     pub fn writer(&self) -> Result<LmdbDatabaseWriter, DatabaseError> {
@@ -128,7 +147,7 @@ pub trait DatabaseReader {
 
     /// Returns a cursor against the given index. The cursor iterates over
     /// the entries in the index's natural key order.
-    fn index_cursor(&self, index: &str) -> Result<LmdbDatabaseReaderCursor, DatabaseError>;
+    fn index_cursor(&self, index: &'static str) -> Result<LmdbDatabaseReaderCursor, DatabaseError>;
 
     /// Returns the number of entries in the main database.
     fn count(&self) -> Result<usize, DatabaseError>;
@@ -137,14 +156,20 @@ pub trait DatabaseReader {
     fn index_count(&self, index: &str) -> Result<usize, DatabaseError>;
 }
 
-pub struct LmdbDatabaseReader<'a> {
-    db: &'a LmdbDatabase,
-    txn: lmdb::ReadTransaction<'static>,
+pub struct LmdbDatabaseReader {
+    db: LmdbDatabase,
+    txn: Option<lmdb::ReadTransaction<'static>>,
 }
 
-impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
+impl LmdbDatabaseReader {
+    fn new(db: LmdbDatabase, txn: lmdb::ReadTransaction<'static>) -> Self {
+        Self { db, txn: Some(txn) }
+    }
+}
+
+impl DatabaseReader for LmdbDatabaseReader {
     fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        let access = self.txn.access();
+        let access = self.txn.as_ref().unwrap().access();
         let val: Result<&[u8], _> = access.get(&self.db.main, key);
         val.ok().map(Vec::from)
     }
@@ -155,37 +180,65 @@ impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
             .indexes
             .get(index)
             .ok_or_else(|| DatabaseError::ReaderError(format!("Not an index: {}", index)))?;
-        let access = self.txn.access();
+        let access = self.txn.as_ref().unwrap().access();
         let val: Result<&[u8], _> = access.get(index, key);
         Ok(val.ok().map(Vec::from))
     }
 
     fn cursor(&self) -> Result<LmdbDatabaseReaderCursor, DatabaseError> {
-        let cursor = self
-            .txn
-            .cursor(self.db.main.clone())
-            .map_err(|err| DatabaseError::ReaderError(format!("{}", err)))?;
-        let access = self.txn.access();
-        Ok(LmdbDatabaseReaderCursor { access, cursor })
+        let txn = self.txn.as_ref().unwrap();
+        let cursor = if let Some(stale_cursor) =
+            STALE_CURSORS.with(|stale_cursors| stale_cursors.borrow_mut().remove("main"))
+        {
+            txn.assoc_cursor(stale_cursor).map_err(|err| {
+                DatabaseError::ReaderError(format!("Unable to revive cursor: {}", err))
+            })?
+        } else {
+            txn.cursor(self.db.main.clone()).map_err(|err| {
+                DatabaseError::ReaderError(format!("Unable to create cursor: {}", err))
+            })?
+        };
+
+        let access = txn.access();
+        Ok(LmdbDatabaseReaderCursor {
+            index: "main",
+            access,
+            cursor: Some(cursor),
+            read_txn: Some(txn),
+        })
     }
 
-    fn index_cursor(&self, index: &str) -> Result<LmdbDatabaseReaderCursor, DatabaseError> {
-        let index = self
-            .db
-            .indexes
-            .get(index)
-            .map(Arc::clone)
-            .ok_or_else(|| DatabaseError::ReaderError(format!("Not an index: {}", index)))?;
-        let cursor = self
-            .txn
-            .cursor(index)
-            .map_err(|err| DatabaseError::ReaderError(format!("{}", err)))?;
-        let access = self.txn.access();
-        Ok(LmdbDatabaseReaderCursor { access, cursor })
+    fn index_cursor(&self, index: &'static str) -> Result<LmdbDatabaseReaderCursor, DatabaseError> {
+        let txn = self.txn.as_ref().unwrap();
+        let cursor = if let Some(stale_cursor) =
+            STALE_CURSORS.with(|stale_cursors| stale_cursors.borrow_mut().remove(index))
+        {
+            // println!("reusing cursor");
+            txn.assoc_cursor(stale_cursor).map_err(|err| {
+                DatabaseError::ReaderError(format!("Unable to revive cursor: {}", err))
+            })?
+        } else {
+            let index_db =
+                self.db.indexes.get(index).map(Arc::clone).ok_or_else(|| {
+                    DatabaseError::ReaderError(format!("Not an index: {}", index))
+                })?;
+            txn.cursor(index_db)
+                .map_err(|err| DatabaseError::ReaderError(format!("{}", err)))?
+        };
+
+        let access = txn.access();
+        Ok(LmdbDatabaseReaderCursor {
+            index,
+            access,
+            cursor: Some(cursor),
+            read_txn: Some(txn),
+        })
     }
 
     fn count(&self) -> Result<usize, DatabaseError> {
         self.txn
+            .as_ref()
+            .unwrap()
             .db_stat(&self.db.main)
             .map_err(|err| {
                 DatabaseError::CorruptionError(format!("Failed to get database stats: {}", err))
@@ -200,6 +253,8 @@ impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
             .get(index)
             .ok_or_else(|| DatabaseError::ReaderError(format!("Not an index: {}", index)))?;
         self.txn
+            .as_ref()
+            .unwrap()
             .db_stat(index)
             .map_err(|err| {
                 DatabaseError::CorruptionError(format!("Failed to get database stats: {}", err))
@@ -208,14 +263,26 @@ impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
     }
 }
 
+impl Drop for LmdbDatabaseReader {
+    fn drop(&mut self) {
+        if let Some(txn) = self.txn.take() {
+            RESET_READ_TXNS.with(|reset_read_txn| *reset_read_txn.borrow_mut() = Some(txn.reset()));
+        }
+    }
+}
+
 pub struct LmdbDatabaseReaderCursor<'a> {
+    index: &'static str,
     access: lmdb::ConstAccessor<'a>,
-    cursor: lmdb::Cursor<'a, 'static>,
+    cursor: Option<lmdb::Cursor<'a, 'static>>,
+    read_txn: Option<&'a lmdb::ReadTransaction<'static>>,
 }
 
 impl<'a> LmdbDatabaseReaderCursor<'a> {
     pub fn first(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
         self.cursor
+            .as_mut()
+            .expect("Using dropped cursor")
             .first(&self.access)
             .ok()
             .map(|(key, value): (&[u8], &[u8])| (Vec::from(key), Vec::from(value)))
@@ -223,6 +290,8 @@ impl<'a> LmdbDatabaseReaderCursor<'a> {
 
     pub fn last(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
         self.cursor
+            .as_mut()
+            .expect("Using dropped cursor")
             .last(&self.access)
             .ok()
             .map(|(key, value): (&[u8], &[u8])| (Vec::from(key), Vec::from(value)))
@@ -234,9 +303,24 @@ impl<'a> Iterator for LmdbDatabaseReaderCursor<'a> {
 
     fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
         self.cursor
+            .as_mut()
+            .expect("Using dropped cursor")
             .next(&self.access)
             .ok()
             .map(|(key, value): (&[u8], &[u8])| (Vec::from(key), Vec::from(value)))
+    }
+}
+
+impl<'a> Drop for LmdbDatabaseReaderCursor<'a> {
+    fn drop(&mut self) {
+        if let Some(read_txn) = self.read_txn.take() {
+            let cursor = self.cursor.take().expect("Using dropped cursor");
+            if let Ok(stale_cursor) = read_txn.dissoc_cursor(cursor) {
+                STALE_CURSORS.with(|stale_cursors| {
+                    stale_cursors.borrow_mut().insert(self.index, stale_cursor);
+                });
+            }
+        }
     }
 }
 
@@ -332,11 +416,16 @@ impl<'a> DatabaseReader for LmdbDatabaseWriter<'a> {
             .cursor(self.db.main.clone())
             .map_err(|err| DatabaseError::ReaderError(format!("{}", err)))?;
         let access = (*self.txn).access();
-        Ok(LmdbDatabaseReaderCursor { access, cursor })
+        Ok(LmdbDatabaseReaderCursor {
+            index: "main",
+            access,
+            cursor: Some(cursor),
+            read_txn: None,
+        })
     }
 
-    fn index_cursor(&self, index: &str) -> Result<LmdbDatabaseReaderCursor, DatabaseError> {
-        let index = self
+    fn index_cursor(&self, index: &'static str) -> Result<LmdbDatabaseReaderCursor, DatabaseError> {
+        let index_db = self
             .db
             .indexes
             .get(index)
@@ -344,10 +433,15 @@ impl<'a> DatabaseReader for LmdbDatabaseWriter<'a> {
             .ok_or_else(|| DatabaseError::ReaderError(format!("Not an index: {}", index)))?;
         let cursor = self
             .txn
-            .cursor(index)
+            .cursor(index_db)
             .map_err(|err| DatabaseError::ReaderError(format!("{}", err)))?;
         let access = (*self.txn).access();
-        Ok(LmdbDatabaseReaderCursor { access, cursor })
+        Ok(LmdbDatabaseReaderCursor {
+            index,
+            access,
+            cursor: Some(cursor),
+            read_txn: None,
+        })
     }
 
     fn count(&self) -> Result<usize, DatabaseError> {
