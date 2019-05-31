@@ -39,6 +39,7 @@ pub(crate) mod gossip;
 pub(crate) mod hashlib;
 pub(crate) mod journal;
 mod metrics;
+pub(crate) mod permissions;
 pub(crate) mod proto;
 pub(crate) mod pylogger;
 pub(crate) mod scheduler;
