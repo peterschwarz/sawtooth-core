@@ -122,7 +122,6 @@ pub struct SyncBlockPublisher {
     identity_signer: PyObject,
     data_dir: PyObject,
     config_dir: PyObject,
-    permission_verifier: PyObject,
 
     exit: Arc<Exit>,
 }
@@ -145,7 +144,6 @@ impl Clone for SyncBlockPublisher {
             identity_signer: self.identity_signer.clone_ref(py),
             data_dir: self.data_dir.clone_ref(py),
             config_dir: self.config_dir.clone_ref(py),
-            permission_verifier: self.permission_verifier.clone_ref(py),
             exit: Arc::clone(&self.exit),
         }
     }
@@ -456,24 +454,12 @@ impl SyncBlockPublisher {
     pub fn on_batch_received(&self, batch: Batch) {
         let mut state = self.state.write().expect("Lock should not be poisoned");
 
-        // Batch can be added if the signer is authorized and the batch isn't already committed
-        let permission_check = {
-            let gil = Python::acquire_gil();
-            let py = gil.python();
-
-            self.permission_verifier
-                .call_method(py, "is_batch_signer_authorized", (batch.clone(),), None)
-                .expect("PermissionVerifier has no method is_batch_signer_authorized")
-                .extract(py)
-                .expect("PermissionVerifier.is_batch_signer_authorized did not return bool")
-        };
-
         let batch_already_committed = self
             .commit_store
             .contains_batch(batch.header_signature.as_str())
             .expect("Couldn't check for batch");
 
-        if permission_check && !batch_already_committed {
+        if !batch_already_committed {
             // If the batch is already in the pending queue, don't do anything further
             if state.pending_batches.append(batch.clone()) {
                 // Notify observers
@@ -530,7 +516,6 @@ impl BlockPublisher {
         identity_signer: PyObject,
         data_dir: PyObject,
         config_dir: PyObject,
-        permission_verifier: PyObject,
         batch_observers: Vec<Box<dyn BatchObserver>>,
         batch_injector_factory: PyObject,
     ) -> Self {
@@ -552,7 +537,6 @@ impl BlockPublisher {
             identity_signer,
             data_dir,
             config_dir,
-            permission_verifier,
             batch_injector_factory,
             exit: Arc::new(Exit::new()),
         };
