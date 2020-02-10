@@ -33,7 +33,10 @@ use transaction::Transaction;
 use journal::chain_commit_state::TransactionCommitCache;
 use journal::commit_store::CommitStore;
 use journal::validation_rule_enforcer;
+use permissions::verifier::PermissionVerifier;
+use state::identity_view::IdentityView;
 use state::settings_view::SettingsView;
+use state::state_view_factory::StateViewFactory;
 
 use pylogger;
 
@@ -71,6 +74,8 @@ pub struct CandidateBlock {
     injected_batch_ids: HashSet<String>,
 
     committed_txn_cache: TransactionCommitCache,
+
+    permission_verifier: PermissionVerifier,
 }
 
 impl CandidateBlock {
@@ -84,8 +89,18 @@ impl CandidateBlock {
         max_batches: usize,
         batch_injectors: Vec<cpython::PyObject>,
         identity_signer: cpython::PyObject,
-        settings_view: SettingsView,
+        state_view_factory: StateViewFactory,
     ) -> Self {
+        let state_root = &previous_block.state_root_hash;
+        let settings_view: SettingsView = state_view_factory
+            .create_view(state_root)
+            .expect("Failed to get state view for previous block");
+        let identity_view: IdentityView = state_view_factory
+            .create_view(state_root)
+            .expect("Failed to get state view for previous block");
+
+        let permission_verifier = PermissionVerifier::with_on_chain_only(Box::new(identity_view));
+
         CandidateBlock {
             previous_block,
             commit_store,
@@ -101,6 +116,7 @@ impl CandidateBlock {
             pending_batches: vec![],
             pending_batch_ids: HashSet::new(),
             injected_batch_ids: HashSet::new(),
+            permission_verifier,
         }
     }
 
@@ -235,7 +251,24 @@ impl CandidateBlock {
                 batch_header_signature.as_str()
             );
             return;
-        } else if self.check_batch_dependencies_add_batch(&batch) {
+        }
+
+        match self.permission_verifier.is_batch_signer_authorized(&batch) {
+            Ok(true) => (),
+            Ok(false) => {
+                debug!(
+                    "Batch {} signer is not permitted as of block {}",
+                    &batch.header_signature, self.previous_block.header_signature,
+                );
+                return;
+            }
+            Err(err) => {
+                error!("Unable to check batch permissions: {}", err);
+                ()
+            }
+        }
+
+        if self.check_batch_dependencies_add_batch(&batch) {
             let mut batches_to_add = vec![];
 
             // Inject blocks at the beginning of a Candidate Block

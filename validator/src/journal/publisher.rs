@@ -289,7 +289,7 @@ impl SyncBlockPublisher {
                 max_batches,
                 batch_injectors,
                 self.identity_signer.clone_ref(py),
-                settings_view,
+                self.state_view_factory.clone(),
             )
         };
 
