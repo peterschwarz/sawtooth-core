@@ -22,7 +22,7 @@ use std::slice;
 
 use cpython::{ObjectProtocol, PyClone, PyList, PyObject, Python};
 use sawtooth::journal::publisher::{
-    BatchObserver, FinalizeBlockError, InitializeBlockError, SyncPublisher,
+    BatchObserver, BatchSubmitter, BlockPublisher, BlockPublisherError,
 };
 use sawtooth::journal::{block_manager::BlockManager, commit_store::CommitStore};
 use sawtooth::protocol::block::BlockPair;
@@ -30,9 +30,7 @@ use sawtooth::state::state_view_factory::StateViewFactory;
 use transact::protocol::batch::Batch;
 
 use crate::py_object_wrapper::PyObjectWrapper;
-use execution::py_executor::PyExecutor;
 use ffi::py_import_class;
-use journal::publisher::{BlockPublisher, IncomingBatchSender};
 
 lazy_static! {
     static ref PY_BATCH_PUBLISHER_CLASS: PyObject = py_import_class(
@@ -51,6 +49,7 @@ pub enum ErrorCode {
     BlockNotInitialized = 0x04,
     BlockEmpty = 0x05,
     MissingPredecessor = 0x07,
+    Internal = 0x08,
 }
 
 macro_rules! check_null {
@@ -131,24 +130,24 @@ pub unsafe extern "C" fn block_publisher_new(
         .call(py, (identity_signer.clone_ref(py), batch_sender), None)
         .expect("Unable to create BatchPublisher");
 
-    let publisher = BlockPublisher::new(
-        commit_store,
-        block_manager,
-        Box::new(
-            PyExecutor::new(transaction_executor)
-                .expect("Failed to create python transaction executor"),
-        ),
-        state_view_factory.clone(),
-        block_sender,
-        batch_publisher,
-        chain_head,
-        identity_signer,
-        data_dir,
-        config_dir,
-        permission_verifier,
-        batch_observers,
-        batch_injector_factory,
-    );
+    let publisher = match BlockPublisher::builder()
+        .with_merkle_state(merkle_state)
+        .with_executor(executor)
+        .with_scheduler_factory(scheduler_factory)
+        .with_block_broadcaster(block_sender)
+        .with_commit_store(commit_store)
+        .with_block_manager(block_manager)
+        .with_state_view_factory(state_view_factory)
+        .with_batch_observers(batch_observers)
+        .with_signer(identity_signer)
+        .start()
+    {
+        Ok(publisher) => publisher,
+        Err(err) => {
+            error!("Unable start publisher: {}", err);
+            return ErrorCode::Internal;
+        }
+    };
 
     *block_publisher_ptr = Box::into_raw(Box::new(publisher)) as *const c_void;
 
@@ -169,15 +168,7 @@ pub unsafe extern "C" fn block_publisher_on_batch_received(
     batch: *mut py_ffi::PyObject,
 ) -> ErrorCode {
     check_null!(publisher, batch);
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-
-    let batch_py_obj = PyObject::from_borrowed_ptr(py, batch);
-    let batch_wrapper = PyObjectWrapper::new(batch_py_obj);
-    let native_batch = Batch::from(batch_wrapper);
-
-    let publisher = (*(publisher as *mut BlockPublisher)).clone();
-    py.allow_threads(move || publisher.publisher.on_batch_received(native_batch));
+    // TODO: How will the existing tests be effected by this change
     ErrorCode::Success
 }
 
@@ -187,8 +178,14 @@ pub unsafe extern "C" fn block_publisher_start(
     incoming_batch_sender: *mut *const c_void,
 ) -> ErrorCode {
     check_null!(publisher);
-    let batch_tx = (*(publisher as *mut BlockPublisher)).start();
-    let batch_tx_ptr: *mut IncomingBatchSender = Box::into_raw(Box::new(batch_tx));
+    let batch_tx = match (*(publisher as *mut BlockPublisher)).take_batch_submitter() {
+        Some(submitter) => submitter,
+        None => {
+            error!("Attempting to start an already started publisher");
+            return ErrorCode::InvalidInput;
+        }
+    };
+    let batch_tx_ptr: *mut BatchSubmitter = Box::into_raw(Box::new(batch_tx));
 
     *incoming_batch_sender = batch_tx_ptr as *const c_void;
 
@@ -198,7 +195,9 @@ pub unsafe extern "C" fn block_publisher_start(
 #[no_mangle]
 pub unsafe extern "C" fn block_publisher_stop(publisher: *mut c_void) -> ErrorCode {
     check_null!(publisher);
-    (*(publisher as *mut BlockPublisher)).stop();
+    (*(publisher as *mut BlockPublisher))
+        .shutdown_signaler()
+        .shutdown();
     ErrorCode::Success
 }
 
@@ -207,10 +206,6 @@ pub unsafe extern "C" fn block_publisher_chain_head_lock(
     publisher_ptr: *mut c_void,
     chain_head_lock_ptr: *mut *const c_void,
 ) -> ErrorCode {
-    check_null!(publisher_ptr);
-    let chain_head_lock = Box::new((*(publisher_ptr as *mut BlockPublisher)).chain_head_lock());
-
-    *chain_head_lock_ptr = Box::into_raw(chain_head_lock) as *const c_void;
     ErrorCode::Success
 }
 
@@ -222,9 +217,8 @@ pub unsafe extern "C" fn block_publisher_pending_batch_info(
 ) -> ErrorCode {
     check_null!(publisher);
 
-    let info = (*(publisher as *mut BlockPublisher)).pending_batch_info();
-    *length = info.0;
-    *limit = info.1;
+    *length = 0;
+    *limit = 0;
 
     ErrorCode::Success
 }
@@ -240,10 +234,19 @@ pub unsafe extern "C" fn block_publisher_initialize_block(
     let wrapper = PyObjectWrapper::new(py_obj);
     let block = BlockPair::from(wrapper);
 
-    let publisher = (*(publisher as *mut BlockPublisher)).clone();
-    py.allow_threads(move || match publisher.initialize_block(&block) {
-        Err(InitializeBlockError::BlockInProgress) => ErrorCode::BlockInProgress,
-        Err(InitializeBlockError::MissingPredecessor) => ErrorCode::MissingPredecessor,
+    let publisher = *(publisher as *mut BlockPublisher);
+    use sawtooth::journal::publisher::BlockInitializationError::*;
+    py.allow_threads(move || match publisher.initialize_block(block) {
+        Err(BlockPublisherError::BlockInitializationFailed(BlockInProgress)) => {
+            ErrorCode::BlockInProgress
+        }
+        Err(BlockPublisherError::BlockInitializationFailed(MissingPredecessor)) => {
+            ErrorCode::MissingPredecessor
+        }
+        Err(err) => {
+            error!("Unexpected error returned from initialize_block: {}", err);
+            ErrorCode::Internal
+        }
         Ok(_) => ErrorCode::Success,
     })
 }
@@ -259,9 +262,15 @@ pub unsafe extern "C" fn block_publisher_finalize_block(
 ) -> ErrorCode {
     check_null!(publisher, consensus);
     let consensus = slice::from_raw_parts(consensus, consensus_len);
-    match (*(publisher as *mut BlockPublisher)).finalize_block(consensus, force) {
-        Err(FinalizeBlockError::BlockNotInitialized) => ErrorCode::BlockNotInitialized,
-        Err(FinalizeBlockError::BlockEmpty) => ErrorCode::BlockEmpty,
+
+    use sawtooth::journal::publisher::BlockCompletionError::*;
+    match (*(publisher as *mut BlockPublisher)).finalize_block(consensus.to_vec()) {
+        Err(BlockPublisherError::BlockCompletionFailed(BlockNotInitialized)) => ErrorCode::BlockNotInitialized,
+        Err(BlockPublisherError::BlockCompletionFailed(BlockEmpty)) => ErrorCode::BlockEmpty,
+        Err(err) => {
+            error!("Unexpected error returned from finalize_block: {}", err);
+            ErrorCode::Internal
+        }
         Ok(block_id) => {
             *result = block_id.as_ptr();
             *result_len = block_id.as_bytes().len();
@@ -282,9 +291,13 @@ pub unsafe extern "C" fn block_publisher_summarize_block(
 ) -> ErrorCode {
     check_null!(publisher);
 
-    match (*(publisher as *mut BlockPublisher)).summarize_block(force) {
-        Err(FinalizeBlockError::BlockEmpty) => ErrorCode::BlockEmpty,
-        Err(FinalizeBlockError::BlockNotInitialized) => ErrorCode::BlockNotInitialized,
+    match (*(publisher as *mut BlockPublisher)).summarize_block() {
+        Err(BlockPublisherError::BlockCompletionFailed(BlockNotInitialized)) => ErrorCode::BlockNotInitialized,
+        Err(BlockPublisherError::BlockCompletionFailed(BlockEmpty)) => ErrorCode::BlockEmpty,
+        Err(err) => {
+            error!("Unexpected error return from finalize_block: {}", err);
+            ErrorCode::Internal
+        }
         Ok(consensus) => {
             *result = consensus.as_ptr();
             *result_len = consensus.as_slice().len();
@@ -357,26 +370,6 @@ pub unsafe extern "C" fn block_publisher_on_chain_updated(
         uncommitted_batches_ptr
     );
 
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    let (chain_head, committed_batches, uncommitted_batches) = {
-        convert_on_chain_updated_args(
-            py,
-            chain_head_ptr,
-            committed_batches_ptr,
-            uncommitted_batches_ptr,
-        )
-    };
-
-    let mut publisher = (*(publisher as *mut BlockPublisher)).clone();
-    py.allow_threads(move || {
-        publisher.publisher.on_chain_updated_internal(
-            chain_head,
-            committed_batches,
-            uncommitted_batches,
-        )
-    });
-
     ErrorCode::Success
 }
 
@@ -392,7 +385,13 @@ pub unsafe extern "C" fn block_publisher_has_batch(
         Err(_) => return ErrorCode::InvalidInput,
     };
 
-    *has = (*(publisher as *mut BlockPublisher)).has_batch(batch_id);
+    *has = match (*(publisher as *mut BlockPublisher)).has_batch(batch_id) {
+        Ok(has) => has,
+        Err(err) => {
+            error!("Unexpected error returned from has_batch: {}", err);
+            return ErrorCode::Internal;
+        }
+    };
 
     ErrorCode::Success
 }
